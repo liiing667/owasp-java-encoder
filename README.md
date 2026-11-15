@@ -118,8 +118,11 @@ that deprecation to `Encoders.URI`, both `ForUriTag` classes and the `forUri`
 tag/function documentation. All of these entry points are retained through 1.x. Encoding a whole URI does not validate it:
 `forUri("javascript:alert(1)")` returns it unchanged. Existing `%` signs are encoded
 again. Use `forUriComponent` for one raw parameter name/value, path segment or
-fragment; validate complete URLs separately, then use `forHtmlAttribute` when
-placing one in a quoted HTML attribute. Parsing with `java.net.URI` alone does
+fragment; for a complete untrusted URL, validate it against a `UriPolicy`
+(explicit scheme/host allow-lists, no userinfo, no malformed ports) and emit
+it with `UriPolicy.encodeForHtmlAttribute`, or validate separately and use
+`forHtmlAttribute` when placing one in a quoted HTML attribute. Parsing with
+`java.net.URI` alone does
 not establish safety. See the [worked URL example](docs/usage.md#urls).
 
 Removing the deprecated core/tag API needs a separately reviewed future-major

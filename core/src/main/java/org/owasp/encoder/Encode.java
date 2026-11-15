@@ -697,7 +697,9 @@ public final class Encode {
      * @deprecated Encoding a complete URI does not make an untrusted URI
      * safe.  Encode each untrusted value inserted into a URL with
      * {@link #forUriComponent(String)} instead.  To use an entire untrusted
-     * URL, parse it with {@link java.net.URI}, allow-list its scheme (for
+     * URL, validate it against a {@link UriPolicy} and emit it with
+     * {@link UriPolicy#encodeForHtmlAttribute(String)}, or parse it with
+     * {@link java.net.URI}, allow-list its scheme (for
      * example {@code http} and {@code https}), enforce any other application
      * restrictions, and then encode it for the
      * enclosing output context, for example with
