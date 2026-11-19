@@ -8,6 +8,13 @@ unchanged. [1.6.0 is available from Central](releases/1.6.0-central-publication.
 
 ## Unreleased
 
+- Make `Encode.forXmlComment` fail-closed: the complete input is validated
+  before any output is produced, and input containing `--` (which also covers
+  the nested comment markers `<!--` and `-->`) or invalid XML 1.0 characters
+  is rejected with `IllegalArgumentException` instead of being silently
+  rewritten. Empty input is accepted and yields an empty comment body;
+  accepted input keeps the existing hyphen-to-`~` output. Ordinary XML
+  content/attribute encoding is unchanged.
 - Remove retired Maven Site sources and archive September maintenance records.
 - Refresh build/dependency documentation and clarify the 1.6.0 review record.
   Encoding behavior, public APIs, and published artifacts are unchanged.

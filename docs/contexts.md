@@ -46,7 +46,10 @@ Use the facade Writer overload when encoding one String directly.
   `forCDATA` and `forXmlComment` implement XML 1.0 contexts; supply their delimiters.
   To remain safe next to trusted literal text, CDATA represents every `]` and
   `>` with close/reopen sequences, and XML comments replace every input hyphen
-  with `~`.
+  with `~`. `forXmlComment` is fail-closed: it validates the complete input
+  before producing output and rejects `--` (including the nested comment
+  markers `<!--` and `-->`) and invalid XML 1.0 characters with
+  `IllegalArgumentException`; empty input yields an empty comment body.
   Invalid-character replacement and XML line-ending normalization can change data.
 - Java source: `forJava` encodes string-literal content for a code generator,
   not JavaScript or JSON. Supply Java quotes; malformed surrogate input is not

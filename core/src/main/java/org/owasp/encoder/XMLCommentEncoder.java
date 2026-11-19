@@ -42,6 +42,13 @@ import java.nio.charset.CoderResult;
  * cannot combine with a hyphen in adjacent trusted literal text. As with all
  * XML-based contexts, invalid XML characters are not allowed.
  *
+ * <p>The {@link Encode#forXmlComment(String)} facade is fail-closed: it
+ * runs {@link #validate(String)} over the complete input before any output
+ * is produced and rejects hyphen runs ("--", which also covers the nested
+ * comment markers "&lt;!--" and "--&gt;") and invalid XML characters with
+ * an {@link IllegalArgumentException}. This streaming encoder retains the
+ * lossy replacement behavior for callers that cannot validate up front.</p>
+ *
  * @author Jeff Ichnowski
  */
 class XMLCommentEncoder extends Encoder {
@@ -50,6 +57,70 @@ class XMLCommentEncoder extends Encoder {
      * This is the character used to replace every input hyphen.
      */
     static final char HYPHEN_REPLACEMENT = '~';
+
+    /**
+     * Fail-closed validation for the {@code Encode.forXmlComment} facade.
+     * The whole input is scanned so that a rejection happens before any
+     * output is produced. A {@code null} input is accepted because the
+     * facade substitutes the literal {@code "null"}, which is valid.
+     *
+     * @param input the comment text to validate
+     * @throws IllegalArgumentException if the input contains "--" (which
+     * subsumes the nested comment markers "&lt;!--" and "--&gt;") or a
+     * character that is not valid in XML 1.0
+     */
+    static void validate(String input) {
+        if (input == null) {
+            return;
+        }
+        final int n = input.length();
+        for (int i = 0; i < n; ++i) {
+            char ch = input.charAt(i);
+            if (ch == '-') {
+                if (i + 1 < n && input.charAt(i + 1) == '-') {
+                    throw new IllegalArgumentException(
+                        "XML comment input must not contain \"--\" "
+                            + "(offset " + i + "); this also rejects the "
+                            + "nested comment markers \"<!--\" and \"-->\"");
+                }
+            } else if (ch <= Unicode.MAX_ASCII) {
+                if (ch < ' ' && ch != '\n' && ch != '\r' && ch != '\t') {
+                    throw invalidCharacter(i, ch);
+                }
+            } else if (ch < Character.MIN_HIGH_SURROGATE) {
+                if (ch <= Unicode.MAX_C1_CTRL_CHAR && ch != Unicode.NEL) {
+                    throw invalidCharacter(i, ch);
+                }
+            } else if (ch <= Character.MAX_HIGH_SURROGATE) {
+                if (i + 1 < n && Character.isLowSurrogate(input.charAt(i + 1))) {
+                    int cp = Character.toCodePoint(ch, input.charAt(i + 1));
+                    if (Unicode.isNonCharacter(cp)) {
+                        throw invalidCharacter(i, cp);
+                    }
+                    ++i;
+                } else {
+                    throw invalidCharacter(i, ch);
+                }
+            } else if (ch <= Character.MAX_LOW_SURROGATE || ch > '\ufffd'
+                    || ('\ufdd0' <= ch && ch <= '\ufdef'))
+            {
+                throw invalidCharacter(i, ch);
+            }
+        }
+    }
+
+    /**
+     * Builds the rejection for a character that is not valid in XML 1.0.
+     *
+     * @param offset the offset of the offending character in the input
+     * @param cp the offending code point (or lone surrogate code unit)
+     * @return the exception to throw
+     */
+    private static IllegalArgumentException invalidCharacter(int offset, int cp) {
+        return new IllegalArgumentException(String.format(
+            "XML comment input contains invalid XML character 0x%X at offset %d",
+            cp, offset));
+    }
 
     // Input:
     // <!-- foo -- bar -->

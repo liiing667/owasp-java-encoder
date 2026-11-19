@@ -232,7 +232,7 @@ public class ContextBoundaryCompositionTest extends TestCase {
         assertEquals(Encode.forCDATA(cdata),
             lowLevelEncode(Encoders.CDATA_ENCODER, cdata, 13));
 
-        String comment = "a--->b";
+        String comment = "a->b";
         assertEquals(Encode.forXmlComment(comment),
             lowLevelEncode(Encoders.XML_COMMENT_ENCODER, comment, 1));
     }
@@ -251,8 +251,8 @@ public class ContextBoundaryCompositionTest extends TestCase {
         assertEncodedWriterSplits(Encoders.JAVASCRIPT_BLOCK, "</ScRiPt ><!-- -->",
             Encode.forJavaScriptBlock("</ScRiPt ><!-- -->"));
         assertEncodedWriterSplits(Encoders.CDATA, "]]>]><safe", Encode.forCDATA("]]>]><safe"));
-        assertEncodedWriterSplits(Encoders.XML_COMMENT, "a--->b",
-            Encode.forXmlComment("a--->b"));
+        assertEncodedWriterSplits(Encoders.XML_COMMENT, "a->b",
+            Encode.forXmlComment("a->b"));
     }
 
     public void testEncodedWriterFlushPreservesSurrogatesWithContextSpecificSpelling() throws Exception {
@@ -338,10 +338,21 @@ public class ContextBoundaryCompositionTest extends TestCase {
 
         String[] forbidden = {"--", "-->"};
         for (String token : forbidden) {
+            try {
+                Encode.forXmlComment(token);
+                fail("fail-closed facade must reject " + token);
+            } catch (IllegalArgumentException expected) {
+            }
             for (int start = 0; start <= 1; start++) {
                 for (int end = start + 1; end <= token.length(); end++) {
-                    String comment = token.substring(0, start)
-                        + Encode.forXmlComment(token.substring(start, end))
+                    String encodedToken;
+                    try {
+                        encodedToken = Encode.forXmlComment(token.substring(start, end));
+                    } catch (IllegalArgumentException rejected) {
+                        // Fail-closed: the boundary emits nothing at all.
+                        continue;
+                    }
+                    String comment = token.substring(0, start) + encodedToken
                         + token.substring(end) + "<evil id='split-pwn'/>";
                     parsed = parseXml("<?xml version='1.0'?><r><!--"
                         + comment + "--></r>");

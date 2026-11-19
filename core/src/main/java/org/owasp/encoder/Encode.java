@@ -889,13 +889,19 @@ public final class Encode {
      *
      * <p>The caller must provide the comment start and end sequences.</p>
      *
-     * <p>This method replaces invalid XML 1.0 characters and the additional
-     * controls and noncharacters described by {@link #forHtml(String)} with spaces,
-     * and replaces every hyphen with a tilde. This prevents an input hyphen
-     * from combining with a hyphen in adjacent trusted text to form the forbidden
-     * "--" sequence. <b>This encoding behavior may change
-     * in future releases.</b>  If the comments need to be decoded, the
-     * caller will need to come up with their own encode/decode system.</p>
+     * <p>This method is fail-closed: the complete input is validated before
+     * any output is produced, and input containing the forbidden "--"
+     * sequence (which also covers the nested comment markers "{@code <!--}"
+     * and "{@code -->}") or characters that are not valid in XML 1.0 is
+     * rejected with an {@link IllegalArgumentException}. Empty input is
+     * accepted and produces an empty comment body.</p>
+     *
+     * <p>In accepted input, every hyphen is replaced with a tilde. This
+     * prevents an input hyphen from combining with a hyphen in adjacent
+     * trusted text to form the forbidden "--" sequence. <b>This encoding
+     * behavior may change in future releases.</b>  If the comments need to
+     * be decoded, the caller will need to come up with their own
+     * encode/decode system.</p>
      *
      * <pre>
      *     out.println("&lt;?xml version='1.0'?&gt;");
@@ -906,8 +912,11 @@ public final class Encode {
      *
      * @param input the input to encode
      * @return the encoded result
+     * @throws IllegalArgumentException if the input contains "--" or a
+     * character that is not valid in XML 1.0
      */
     public static String forXmlComment(String input) {
+        XMLCommentEncoder.validate(input);
         return encode(Encoders.XML_COMMENT_ENCODER, input);
     }
 
@@ -918,11 +927,15 @@ public final class Encode {
      * @param out where to write encoded output
      * @param input the input string to encode
      * @throws NullPointerException if out is null
+     * @throws IllegalArgumentException if the input contains "--" or a
+     * character that is not valid in XML 1.0; thrown before anything is
+     * written to {@code out}
      * @throws IOException if thrown by writer
      */
     public static void forXmlComment(Writer out, String input)
         throws IOException
     {
+        XMLCommentEncoder.validate(input);
         encode(Encoders.XML_COMMENT_ENCODER, out, input);
     }
 
