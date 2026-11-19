@@ -175,9 +175,9 @@
     <tag>
         <description>
             Encodes for unquoted HTML attribute values. Prefer quoted attributes with
-            forHtmlAttribute. Empty input produces empty output, which cannot represent an unquoted
-            attribute value; a following attribute name may be consumed as the value even when
-            separated by a space.
+            forHtmlAttribute. Empty input produces the two-character output "" (a quoted empty attribute
+            value), so the attribute boundary is preserved and a following attribute name
+            cannot be consumed as the value.
         </description>
         <display-name>forHtmlUnquotedAttribute</display-name>
         <name>forHtmlUnquotedAttribute</name>
@@ -360,9 +360,9 @@
     <function>
         <description>
             Encodes for unquoted HTML attribute values. Prefer quoted attributes with
-            forHtmlAttribute. Empty input produces empty output, which cannot represent an unquoted
-            attribute value; a following attribute name may be consumed as the value even when
-            separated by a space.
+            forHtmlAttribute. Empty input produces the two-character output "" (a quoted empty attribute
+            value), so the attribute boundary is preserved and a following attribute name
+            cannot be consumed as the value.
         </description>
         <display-name>forHtmlUnquotedAttribute</display-name>
         <name>forHtmlUnquotedAttribute</name>

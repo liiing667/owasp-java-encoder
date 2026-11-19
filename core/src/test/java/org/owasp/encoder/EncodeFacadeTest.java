@@ -100,6 +100,11 @@ public class EncodeFacadeTest extends TestCase {
     private void assertFacade(EncoderContexts context, String input) throws Exception {
         Encoder encoder = Encoders.forName(context.name);
         String expected = input == null ? "null" : Encode.encode(encoder, input);
+        if ("".equals(input) && Encoders.HTML_UNQUOTED_ATTRIBUTE.equals(context.name)) {
+            // Facade-level policy: an empty unquoted attribute value is
+            // emitted as a quoted empty value to preserve the boundary.
+            expected = "\"\"";
+        }
         Method stringMethod = Encode.class.getMethod(context.method, String.class);
         Method writerMethod = Encode.class.getMethod(context.method, Writer.class, String.class);
         assertEquals(context.method + " String", expected, stringMethod.invoke(null, (Object) input));

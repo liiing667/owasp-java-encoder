@@ -359,9 +359,12 @@ public final class Encode {
      * such context).  The caller should make sure that the attribute
      * value does not abut unsafe characters--and thus should usually
      * err on the side of including a space character after the
-     * value. Empty input produces empty output, which cannot represent an
-     * unquoted attribute value: a following attribute name may be consumed as
-     * the value. A trailing space does not solve this. Use quoted attributes
+     * value. Empty input produces the two-character output {@code ""}
+     * (a quoted empty attribute value), so the attribute boundary is
+     * preserved and a following attribute name cannot be consumed as the
+     * value. A null input is encoded as the four characters {@code null},
+     * consistent with the rest of this class. Both policies keep the
+     * resulting attribute value well-formed. Use quoted attributes
      * with {@link #forHtmlAttribute(String)} when the value can be empty.</p>
      *
      * <p>Use of this method is discouraged as quoted attributes are
@@ -420,12 +423,15 @@ public final class Encode {
      *         <td class="colFirst">{@code =}</td>
      *         <td class="colLast">{@code &#61;}</td></tr>
      *     <tr class="altColor">
+     *         <td class="colFirst">{@code \}</td>
+     *         <td class="colLast">{@code &#92;}</td></tr>
+     *     <tr class="rowColor">
      *         <td class="colFirst">{@code `}</td>
      *         <td class="colLast">{@code &#96;}</td></tr>
-     *     <tr class="rowColor">
+     *     <tr class="altColor">
      *         <td class="colFirst">{@code U+2028} (line separator)</td>
      *         <td class="colLast">{@code &#8232;}</td></tr>
-     *     <tr class="altColor">
+     *     <tr class="rowColor">
      *         <td class="colFirst">{@code U+2029} (paragraph separator)</td>
      *         <td class="colLast">{@code &#8233;}</td></tr>
      *   </tbody>
@@ -439,7 +445,7 @@ public final class Encode {
      * {@code (}, {@code )}, {@code
      * *}, {@code +}, {@code ,},
      * {@code -}, {@code .}, {@code
-     * [}, {@code \}, {@code ]},
+     * [}, {@code ]},
      * {@code ^}, {@code _}, {@code
      * }}, {@code :}, {@code ;}, {@code ?}, {@code @}, <code>{</code>,
      * {@code |}, {@code ~}.</li>
@@ -459,6 +465,13 @@ public final class Encode {
      * context.
      */
     public static String forHtmlUnquotedAttribute(String input) {
+        if (input != null && input.isEmpty()) {
+            // An unquoted attribute value cannot be empty: the tag
+            // delimiter or a following attribute name would be consumed
+            // as the value. Emit a quoted empty value so the attribute
+            // boundary is preserved.
+            return "\"\"";
+        }
         return encode(Encoders.HTML_UNQUOTED_ATTRIBUTE_ENCODER, input);
     }
 
@@ -474,6 +487,12 @@ public final class Encode {
     public static void forHtmlUnquotedAttribute(Writer out, String input)
         throws IOException
     {
+        if (input != null && input.isEmpty()) {
+            // See the String overload: keep the attribute boundary
+            // well-formed for empty values.
+            out.write("\"\"");
+            return;
+        }
         encode(Encoders.HTML_UNQUOTED_ATTRIBUTE_ENCODER, out, input);
     }
 

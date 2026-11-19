@@ -102,6 +102,7 @@ class HTMLEncoder extends Encoder {
                 case '\'':
                 case '/':
                 case '=':
+                case '\\':
                 case '`':
                 case '&':
                 case '<':
@@ -163,7 +164,6 @@ class HTMLEncoder extends Encoder {
                 case 'Z':
 
                 case '[':
-                case '\\':
                 case ']':
                 case '^':
                 case '_':
@@ -309,6 +309,7 @@ class HTMLEncoder extends Encoder {
                 case '\'':
                 case '/':
                 case '=':
+                case '\\':
                 case '`':
                     if (ENCODE_AFFIX_CHAR_COUNT + 2 + j > m) {
                         return overflow(input, i, output, j);
@@ -392,7 +393,6 @@ class HTMLEncoder extends Encoder {
                 case 'Z':
 
                 case '[':
-                case '\\':
                 case ']':
                 case '^':
                 case '_':
