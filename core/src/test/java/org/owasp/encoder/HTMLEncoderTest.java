@@ -34,6 +34,8 @@
 
 package org.owasp.encoder;
 
+import java.io.IOException;
+import java.io.StringWriter;
 import junit.framework.Test;
 import junit.framework.TestCase;
 
@@ -44,12 +46,13 @@ import junit.framework.TestCase;
  */
 public class HTMLEncoderTest extends TestCase {
     public static Test suite() {
-        return new EncoderTestSuiteBuilder(new HTMLEncoder(), "-safe-", "-&-")
+        return new EncoderTestSuiteBuilder(HTMLEncoderTest.class, new HTMLEncoder(), "-safe-", "-&-")
             .encode("&amp;", "&")
             .encode("&gt;", ">")
             .encode("&lt;", "<")
             .encode("&#39;", "\'")
             .encode("&#34;", "\"")
+            .encode("&#92;", "\\")
             .encode("space", "&#32;", " ")
             .encode("tab", "&#9;", "\t")
             .encode("LF", "&#10;", "\n")
@@ -73,7 +76,7 @@ public class HTMLEncoderTest extends TestCase {
             .valid("\t\r\n")
             .valid(' ', Character.MAX_CODE_POINT)
             .invalid(0x7f, 0x9f)
-            .encoded("&><\'\"/`= \r\n\t\f\u2028\u2029")
+            .encoded("&><\'\"/`=\\ \r\n\t\f\u2028\u2029")
             .invalid(Character.MIN_SURROGATE, Character.MAX_SURROGATE)
             .invalid(0xfdd0, 0xfdef)
             .invalid(0xfffe, 0xffff)
@@ -99,5 +102,74 @@ public class HTMLEncoderTest extends TestCase {
             .encodedSuite()
 
             .build();
+    }
+
+    /**
+     * A fixed HTML snippet with an unquoted attribute value.  Attack
+     * values containing whitespace, equals signs or backslashes must
+     * not be able to break out of the attribute value boundary and
+     * inject a new attribute.
+     */
+    public void testFixedSnippetRejectsAttackValue() {
+        assertEquals(
+            "<input value=x&#32;onmouseover&#61;alert(1) >",
+            renderSnippet("x onmouseover=alert(1)"));
+        assertEquals(
+            "<input value=a&#61;b >",
+            renderSnippet("a=b"));
+        assertEquals(
+            "<input value=x&#92;y >",
+            renderSnippet("x\\y"));
+        assertEquals(
+            "<input value=x&#9;y >",
+            renderSnippet("x\ty"));
+        assertEquals(
+            "<input value=x&#96;y >",
+            renderSnippet("x`y"));
+    }
+
+    /**
+     * The same fixed snippet with compatible values: values that were
+     * already safe continue to render unchanged, so legitimate old
+     * templates keep working.
+     */
+    public void testFixedSnippetCompatibleValue() {
+        assertEquals(
+            "<input value=safe-value_1.0 >",
+            renderSnippet("safe-value_1.0"));
+        assertEquals(
+            "<input value=ABCxyz019 >",
+            renderSnippet("ABCxyz019"));
+        assertEquals(
+            "<input value=!#$%()*+,.[]^_{}|~?:;@ >",
+            renderSnippet("!#$%()*+,.[]^_{}|~?:;@"));
+    }
+
+    /**
+     * Null and empty inputs follow the same policy as every other
+     * encoder: null becomes the literal "null" (a safe unquoted
+     * value), and empty input produces empty output.
+     */
+    public void testNullAndEmptyPolicy() {
+        assertEquals("null", Encode.forHtmlUnquotedAttribute(null));
+        assertEquals("", Encode.forHtmlUnquotedAttribute(""));
+        assertEquals(
+            "<input value=null >",
+            renderSnippet(null));
+    }
+
+    /**
+     * The Writer-based variant must produce the same result as the
+     * String-based one so both template styles stay consistent.
+     */
+    public void testWriterVariantConsistentWithString() throws IOException {
+        String input = "x onmouseover=alert(1)\\";
+        StringWriter out = new StringWriter();
+        Encode.forHtmlUnquotedAttribute(out, input);
+        assertEquals(Encode.forHtmlUnquotedAttribute(input), out.toString());
+    }
+
+    private static String renderSnippet(String value) {
+        return "<input value=" + Encode.forHtmlUnquotedAttribute(value) + " >";
     }
 }

@@ -420,12 +420,15 @@ public final class Encode {
      *         <td class="colFirst">{@code =}</td>
      *         <td class="colLast">{@code &#61;}</td></tr>
      *     <tr class="altColor">
+     *         <td class="colFirst">{@code \}</td>
+     *         <td class="colLast">{@code &#92;}</td></tr>
+     *     <tr class="rowColor">
      *         <td class="colFirst">{@code `}</td>
      *         <td class="colLast">{@code &#96;}</td></tr>
-     *     <tr class="rowColor">
+     *     <tr class="altColor">
      *         <td class="colFirst">{@code U+2028} (line separator)</td>
      *         <td class="colLast">{@code &#8232;}</td></tr>
-     *     <tr class="altColor">
+     *     <tr class="rowColor">
      *         <td class="colFirst">{@code U+2029} (paragraph separator)</td>
      *         <td class="colLast">{@code &#8233;}</td></tr>
      *   </tbody>
@@ -439,10 +442,24 @@ public final class Encode {
      * {@code (}, {@code )}, {@code
      * *}, {@code +}, {@code ,},
      * {@code -}, {@code .}, {@code
-     * [}, {@code \}, {@code ]},
+     * [}, {@code ]},
      * {@code ^}, {@code _}, {@code
      * }}, {@code :}, {@code ;}, {@code ?}, {@code @}, <code>{</code>,
      * {@code |}, {@code ~}.</li>
+     *
+     * <li>The backslash ({@code \}) is encoded even though the HTML5
+     * tokenizer does not strictly require it: some browsers have
+     * historically treated a backslash as a quote character, which
+     * would let the following text be parsed as a new attribute.
+     * Encoding it keeps the attribute value boundary intact in those
+     * browsers as well.</li>
+     *
+     * <li>A {@code null} input is encoded as the literal string
+     * {@code "null"}, consistent with {@link String#valueOf(Object)}
+     * and all other encoding methods.  An empty input produces empty
+     * output, which cannot represent an unquoted attribute value--use
+     * a quoted attribute with {@link #forHtmlAttribute(String)} when
+     * the value can be empty.</li>
      *
      * <li>Surrogate pairs are passed through only if valid.  Invalid
      * surrogate pairs are replaced by a hyphen (-).</li>
