@@ -18,6 +18,9 @@ out.write("\">");
 ```
 
 `out` is a `java.io.Writer` owned by the caller; handle its `IOException` normally.
+Each Writer overload synchronizes on `out` for one logical encoding, so
+concurrent encodings to a shared writer stay contiguous and coordinate with
+`EncodedWriter` instances wrapping the same writer.
 String-returning calls such as `Encode.forHtmlAttribute(userText)` have the same
 context contract. Do not reuse this result for JavaScript, CSS or a URL component.
 Avoid double escaping with frameworks that already escape HTML output.

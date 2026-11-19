@@ -8,6 +8,13 @@ unchanged. [1.6.0 is available from Central](releases/1.6.0-central-publication.
 
 ## Unreleased
 
+- Harden the `Encode` Writer overloads for shared writers: each call now
+  synchronizes on the output writer for the duration of one logical encoding
+  (the same monitor `EncodedWriter` uses), so concurrent encodings can no
+  longer interleave into half-encoded segments, and a null writer fails with
+  `NullPointerException` before any output. `IOException` from the writer
+  still propagates; `EncodedWriter` retains buffered output and pending input
+  after a delegate failure so a recovered writer receives it exactly once.
 - Remove retired Maven Site sources and archive September maintenance records.
 - Refresh build/dependency documentation and clarify the 1.6.0 review record.
   Encoding behavior, public APIs, and published artifacts are unchanged.

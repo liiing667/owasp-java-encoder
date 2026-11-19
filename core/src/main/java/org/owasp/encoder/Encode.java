@@ -54,8 +54,13 @@ import java.nio.charset.CoderResult;
  *
  * <p>A null input string is encoded as the four characters {@code null}.
  * Writer overloads throw {@link NullPointerException} for a null output writer.
- * These static methods may be called concurrently; callers are responsible for
- * coordinating access to a shared output writer.</p>
+ * These static methods may be called concurrently.  Each Writer overload
+ * synchronizes on the output writer for the duration of one logical encoding,
+ * so concurrent encodings to a shared writer are not interleaved; the same
+ * monitor also coordinates with {@link EncodedWriter} instances wrapping that
+ * writer.  If the writer throws {@link IOException}, the exception propagates
+ * and the output written so far is left as-is--a failed call never reports
+ * success, and retrying re-encodes the complete input.</p>
  *
  * <p>For large inputs, prefer the Writer overloads or {@link EncodedWriter}.
  * String overloads retain the complete encoded result in memory, while the
@@ -1690,6 +1695,9 @@ public final class Encode {
     static void encode(Encoder encoder, Writer out, String str)
         throws IOException
     {
+        if (out == null) {
+            throw new NullPointerException("out must not be null");
+        }
         if (str == null) {
             // consistent with String.valueOf(...) use "null" for null.
             str = "null";
@@ -1701,14 +1709,27 @@ public final class Encode {
         int j = encoder.firstEncodedOffset(str, 0, n);
 
         if (j == n) {
-            out.write(str);
+            // synchronize with other coordinated users of the writer (e.g.
+            // EncodedWriter) so a pass-through write cannot split another
+            // logical encoding.
+            synchronized (out) {
+                out.write(str);
+            }
             return;
         }
 
         // otherwise, we need to encode.  We use a buffer to avoid
         // excessive memory allocation for these calls.  Note: this means that
         // an encoder implementation must NEVER call this method internally.
-        new Buffer().encode(encoder, out, str, j);
+        // Hold the writer's monitor for the whole logical encoding so
+        // concurrent reuse of the same writer cannot interleave the batched
+        // output of two encodings.  EncodedWriter synchronizes on the same
+        // lock (its wrapped writer), so the two APIs coordinate with each
+        // other.  If the writer throws, the exception propagates with the
+        // lock released; the caller owns the partially written output.
+        synchronized (out) {
+            new Buffer().encode(encoder, out, str, j);
+        }
     }
 
     /**

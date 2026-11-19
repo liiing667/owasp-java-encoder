@@ -57,6 +57,16 @@ import java.nio.charset.CoderResult;
  * string followed by trusted output, use the Writer overloads of {@link Encode}
  * instead. Closing this writer also closes its wrapped writer.</p>
  *
+ * <p>If the wrapped writer throws {@link IOException}, the exception
+ * propagates and this writer keeps its buffered state: encoded output that
+ * could not be written stays buffered, and pending lookahead input is
+ * retained.  After the wrapped writer recovers, a repeated {@link #flush()}
+ * or {@link #close()} emits the retained output exactly once, so the final
+ * output still matches encoding the same input in one call.  Do not retry a
+ * failed {@code write} with the same characters--input already consumed by
+ * that call is encoded in the buffer and would be written twice.  A failed
+ * {@link #close()} still closes this writer and the wrapped writer.</p>
+ *
  * @author Jeff Ichnowski
  */
 public class EncodedWriter extends Writer {
