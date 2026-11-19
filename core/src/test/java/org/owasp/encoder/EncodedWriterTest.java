@@ -41,6 +41,12 @@ import java.nio.CharBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -236,6 +242,283 @@ public class EncodedWriterTest {
         writer.write("\uDE00");
         writer.close();
         assertEquals("x\uD83D\uDE00", out.toString());
+    }
+
+    @Test
+    public void delegateWriteFailureIsPropagatedAndMarksWriterBroken() throws IOException {
+        RecoverableWriter out = new RecoverableWriter();
+        final EncodedWriter writer = new EncodedWriter(out, Encoders.HTML);
+        writer.write("safe");
+        writer.flush();
+        out.failWrites();
+
+        try {
+            writer.flush();
+            fail("flush should propagate the delegate failure");
+        } catch (IOException expected) {
+            assertEquals("delegate write failed", expected.getMessage());
+        }
+
+        assertBroken(writer, "delegate write failed");
+        writer.close();
+        assertEquals(1, out.closeCount);
+        // The accepted prefix is retained exactly; nothing failed is appended.
+        assertEquals("safe", out.toString());
+
+        writer.close();
+        assertEquals(1, out.closeCount);
+    }
+
+    @Test
+    public void interruptedStreamKeepsAcceptedPrefixWithoutDuplicatingBuffer()
+            throws IOException {
+        RecoverableWriter out = new RecoverableWriter();
+        EncodedWriter writer = new EncodedWriter(out, Encoders.HTML);
+        // More than one output-buffer fill forces flushBufferToWriter while
+        // input remains, so the internal buffer holds unsent encoded text.
+        char[] input = new char[EncodedWriter.BUFFER_SIZE * 2 + 5];
+        Arrays.fill(input, '<');
+        out.failAfterAcceptedWrites(1);
+
+        try {
+            writer.write(input);
+            fail("write should propagate the mid-stream delegate failure");
+        } catch (IOException expected) {
+            assertEquals("delegate write failed", expected.getMessage());
+        }
+
+        String acceptedAtFailure = out.toString();
+        int writesAtFailure = out.writeCount;
+        assertTrue(writesAtFailure > 0);
+
+        // Every later operation must report the failure rather than look ok.
+        assertBroken(writer, "delegate write failed");
+        assertEquals(writesAtFailure, out.writeCount);
+        assertEquals(acceptedAtFailure, out.toString());
+
+        writer.close();
+        assertEquals(writesAtFailure, out.writeCount);
+        assertEquals(acceptedAtFailure, out.toString());
+        // Accepted output is an exact prefix of the one-shot encoding: every
+        // handed-off chunk is complete, in order and never written twice.
+        String fullEncoding = Encode.forHtml(new String(input));
+        assertEquals(fullEncoding.substring(0, acceptedAtFailure.length()), acceptedAtFailure);
+        assertTrue(acceptedAtFailure.length() < fullEncoding.length());
+    }
+
+    @Test
+    public void recoveredDelegateResumesEncodingThroughAFreshWriter()
+            throws IOException {
+        RecoverableWriter out = new RecoverableWriter();
+        EncodedWriter first = new EncodedWriter(out, Encoders.HTML);
+        first.write("a<");
+        first.flush();
+        out.failWrites();
+        try {
+            first.flush();
+            fail("flush should propagate the delegate failure");
+        } catch (IOException expected) {
+            assertEquals("delegate write failed", expected.getMessage());
+        }
+        first.close();
+        String prefix = out.toString();
+        assertEquals("a&lt;", prefix);
+
+        // The fixed delegate recovers; a new writer resumes the stream and
+        // the concatenation equals encoding the whole logical text at once.
+        out.recover();
+        EncodedWriter second = new EncodedWriter(out, Encoders.HTML);
+        second.write("b>c");
+        second.close();
+
+        assertEquals(Encode.forHtml("a<b>c"), out.toString());
+        assertEquals(2, out.closeCount);
+    }
+
+    @Test
+    public void failedBufferDrainDuringFlushIsPropagatedAndMarksWriterBroken()
+            throws IOException {
+        RecoverableWriter out = new RecoverableWriter();
+        final EncodedWriter writer = new EncodedWriter(out, Encoders.HTML);
+        // Keep the encoded output inside the EncodedWriter buffer until flush.
+        writer.write("<a>");
+        assertEquals(0, out.writeCount);
+        // flush() drains the internal buffer through a delegated write before
+        // calling flush(); failing there models a broken underlying stream.
+        out.failWrites();
+
+        try {
+            writer.flush();
+            fail("flush should propagate the delegate write failure");
+        } catch (IOException expected) {
+            assertEquals("delegate write failed", expected.getMessage());
+        }
+
+        assertBroken(writer, "delegate write failed");
+
+        out.recover();
+        assertBroken(writer, "delegate write failed");
+        writer.close();
+        // The failed flush never reached the delegate, so it received nothing.
+        assertEquals("", out.toString());
+
+        // A replacement writer over the recovered delegate still produces the
+        // complete encoding, streamed in order.
+        out.recover();
+        EncodedWriter replacement = new EncodedWriter(out, Encoders.HTML);
+        replacement.write("<a>");
+        replacement.close();
+        assertEquals(Encode.forHtml("<a>"), out.toString());
+    }
+
+    @Test
+    public void pureDelegateFlushFailureIsPropagatedAndMarksWriterBroken()
+            throws IOException {
+        RecoverableWriter out = new RecoverableWriter();
+        final EncodedWriter writer = new EncodedWriter(out, Encoders.HTML);
+        // An empty internal buffer means flush() reaches the delegate flush
+        // without any preceding write.
+        writer.flush();
+        assertEquals(1, out.flushCount);
+        out.failFlushes();
+
+        try {
+            writer.flush();
+            fail("flush should propagate the delegate flush failure");
+        } catch (IOException expected) {
+            assertEquals("delegate flush failed", expected.getMessage());
+        }
+
+        assertBroken(writer, "delegate flush failed");
+        writer.close();
+        assertEquals("", out.toString());
+    }
+
+    @Test(timeout = 30000)
+    public void concurrentWritesStaySynchronizedAndFailureIsVisibleToEveryCaller()
+            throws Exception {
+        final RecoverableWriter out = new RecoverableWriter();
+        final EncodedWriter writer = new EncodedWriter(out, Encoders.HTML);
+        int threads = 4;
+        int chunksPerThread = 200;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<?>> results = new ArrayList<Future<?>>();
+            for (int t = 0; t < threads; ++t) {
+                final int index = t;
+                results.add(pool.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        awaitQuietly(start);
+                        for (int i = 0; i < chunksPerThread; ++i) {
+                            try {
+                                writer.write("t" + index + "<");
+                            } catch (IOException e) {
+                                throw new AssertionError("healthy stream failed", e);
+                            }
+                        }
+                    }
+                }));
+            }
+            start.countDown();
+            for (Future<?> result : results) {
+                result.get(30, TimeUnit.SECONDS);
+            }
+            writer.close();
+
+            // Each delegated write is one encoded chunk, so every chunk stays
+            // intact and is accepted exactly once; thread scheduling decides
+            // the chunk order, but no content may be lost or duplicated.
+            int totalInputs = threads * chunksPerThread;
+            String accepted = out.toString();
+            assertEquals(totalInputs * ("t".length() + 1 + "&lt;".length()),
+                accepted.length());
+            for (int t = 0; t < threads; ++t) {
+                String expectedChunk = "t" + t + "&lt;";
+                int occurrences = 0;
+                int index = 0;
+                while ((index = accepted.indexOf(expectedChunk, index)) != -1) {
+                    ++occurrences;
+                    index += expectedChunk.length();
+                }
+                assertEquals(chunksPerThread, occurrences);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // A later failure on a reused writer must be visible to all callers.
+        RecoverableWriter failing = new RecoverableWriter();
+        final EncodedWriter broken = new EncodedWriter(failing, Encoders.HTML);
+        broken.write("ok");
+        broken.flush();
+        failing.failWrites();
+        try {
+            broken.flush();
+            fail("flush should propagate the delegate failure");
+        } catch (IOException expected) {
+            assertEquals("delegate write failed", expected.getMessage());
+        }
+        ExecutorService failurePool = Executors.newFixedThreadPool(threads);
+        try {
+            final AtomicInteger failures = new AtomicInteger();
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<?>> results = new ArrayList<Future<?>>();
+            for (int t = 0; t < threads; ++t) {
+                results.add(failurePool.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        awaitQuietly(start);
+                        try {
+                            broken.write("<");
+                        } catch (IOException e) {
+                            failures.incrementAndGet();
+                        }
+                    }
+                }));
+            }
+            start.countDown();
+            for (Future<?> result : results) {
+                result.get(30, TimeUnit.SECONDS);
+            }
+            assertEquals(threads, failures.get());
+            broken.close();
+            assertEquals("ok", failing.toString());
+        } finally {
+            failurePool.shutdownNow();
+        }
+    }
+
+    private static void assertBroken(EncodedWriter writer, String causeMessage) {
+        try {
+            writer.write("z");
+            fail("write on a broken writer should fail");
+        } catch (IOException expected) {
+            assertSameCause(causeMessage, expected);
+        }
+        try {
+            writer.flush();
+            fail("flush on a broken writer should fail");
+        } catch (IOException expected) {
+            assertSameCause(causeMessage, expected);
+        }
+    }
+
+    private static void assertSameCause(String causeMessage, IOException failure) {
+        assertEquals("Writer is broken by an earlier I/O failure", failure.getMessage());
+        Throwable cause = failure.getCause();
+        assertTrue("expected wrapped cause", cause instanceof IOException);
+        assertEquals(causeMessage, cause.getMessage());
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(e);
+        }
     }
 
     @Test
@@ -465,6 +748,78 @@ public class EncodedWriterTest {
             if (failClose) {
                 throw new IOException("close failed");
             }
+        }
+    }
+
+    /**
+     * A fixed in-memory delegate that models a stream which fails mid-use and
+     * can later be recovered. It records every chunk the EncodedWriter actually
+     * handed off, together with write, flush and close counts, so tests can
+     * prove that interrupted output is neither duplicated nor partially
+     * replayed and that streaming resumes correctly after {@link #recover()}.
+     */
+    private static final class RecoverableWriter extends Writer {
+
+        private final StringBuilder output = new StringBuilder();
+        private volatile boolean writesFailing;
+        private volatile boolean flushesFailing;
+        private volatile int acceptedWritesBeforeFailure = Integer.MAX_VALUE;
+        private boolean closed;
+        private int writeCount;
+        private int flushCount;
+        private int closeCount;
+
+        void failWrites() {
+            writesFailing = true;
+        }
+
+        void failFlushes() {
+            flushesFailing = true;
+        }
+
+        void failAfterAcceptedWrites(int acceptedWrites) {
+            acceptedWritesBeforeFailure = acceptedWrites;
+        }
+
+        void recover() {
+            writesFailing = false;
+            flushesFailing = false;
+            acceptedWritesBeforeFailure = Integer.MAX_VALUE;
+            closed = false;
+        }
+
+        @Override
+        public void write(char[] cbuf, int off, int len) throws IOException {
+            if (closed) {
+                throw new IOException("delegate is closed");
+            }
+            if (writesFailing || writeCount >= acceptedWritesBeforeFailure) {
+                throw new IOException("delegate write failed");
+            }
+            output.append(cbuf, off, len);
+            ++writeCount;
+        }
+
+        @Override
+        public void flush() throws IOException {
+            ++flushCount;
+            if (flushesFailing) {
+                throw new IOException("delegate flush failed");
+            }
+            if (closed) {
+                throw new IOException("delegate is closed");
+            }
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+            ++closeCount;
+        }
+
+        @Override
+        public String toString() {
+            return output.toString();
         }
     }
 }

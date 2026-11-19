@@ -57,6 +57,18 @@ import java.nio.charset.CoderResult;
  * string followed by trusted output, use the Writer overloads of {@link Encode}
  * instead. Closing this writer also closes its wrapped writer.</p>
  *
+ * <p>If a write or flush to the wrapped writer fails with an
+ * {@link IOException}, that failure is propagated and this writer becomes
+ * broken. Its buffered and pending input are retained untouched, and every
+ * later {@code write} or {@code flush} throws an {@code IOException} carrying
+ * the original cause rather than silently accepting more input or re-sending
+ * the buffered prefix. The accepted output therefore stays a prefix of the
+ * full encoding, with no duplicated or half-written sequence. Create a new
+ * writer over a recovered or replacement output to resume streaming. Closing
+ * a broken writer still closes the wrapped writer exactly once. When a final
+ * flush fails and the close also fails, the close failure is added as a
+ * suppressed exception.</p>
+ *
  * @author Jeff Ichnowski
  */
 public class EncodedWriter extends Writer {
@@ -107,6 +119,16 @@ public class EncodedWriter extends Writer {
     private boolean _closed;
 
     /**
+     * The first IOException raised by the wrapped writer while encoding or
+     * flushing. Once set, this writer is broken: every later write and flush
+     * fails with the same cause instead of appearing to succeed and appending
+     * a duplicate or partial encoding. The output buffers are left untouched
+     * so the accepted prefix is never written twice. Closing a broken writer
+     * still closes the wrapped writer exactly once.
+     */
+    private IOException _broken;
+
+    /**
      * Creates an EncodedWriter that uses the specified encoder to encode all input before sending it to the wrapped writer.
      *
      * @param out the target for all writes
@@ -149,6 +171,7 @@ public class EncodedWriter extends Writer {
     public void write(char[] cbuf, int off, int len) throws IOException {
         synchronized (lock) {
             ensureOpen();
+            ensureNotBroken();
             if (cbuf == null) {
                 throw new NullPointerException("cbuf must not be null");
             }
@@ -159,24 +182,29 @@ public class EncodedWriter extends Writer {
             CharBuffer input = CharBuffer.wrap(cbuf);
             input.limit(off + len).position(off);
 
-            flushLeftOver(input);
+            try {
+                flushLeftOver(input);
 
-            for (;;) {
-                CoderResult cr = _encoder.encode(input, _buffer, false);
+                for (;;) {
+                    CoderResult cr = _encoder.encode(input, _buffer, false);
 
-                if (cr.isUnderflow()) {
-                    if (input.hasRemaining()) {
-                        if (_leftOverBuffer == null) {
-                            _leftOverBuffer = CharBuffer.allocate(LEFT_OVER_BUFFER);
+                    if (cr.isUnderflow()) {
+                        if (input.hasRemaining()) {
+                            if (_leftOverBuffer == null) {
+                                _leftOverBuffer = CharBuffer.allocate(LEFT_OVER_BUFFER);
+                            }
+                            _leftOverBuffer.put(input);
+                            _hasLeftOver = true;
                         }
-                        _leftOverBuffer.put(input);
-                        _hasLeftOver = true;
+                        return;
                     }
-                    return;
+                    if (cr.isOverflow()) {
+                        flushBufferToWriter();
+                    }
                 }
-                if (cr.isOverflow()) {
-                    flushBufferToWriter();
-                }
+            } catch (IOException e) {
+                _broken = e;
+                throw e;
             }
         }
     }
@@ -240,19 +268,40 @@ public class EncodedWriter extends Writer {
         }
     }
 
+    /**
+     * Fails fast once the wrapped writer has rejected an output or flush
+     * operation. Continuing to encode after such a failure could re-send the
+     * buffered prefix or append output whose end state the caller can no
+     * longer trust, so the original failure is rethrown for every later
+     * write and flush.
+     *
+     * @throws IOException the failure that broke this writer, if any
+     */
+    private void ensureNotBroken() throws IOException {
+        if (_broken != null) {
+            throw new IOException("Writer is broken by an earlier I/O failure", _broken);
+        }
+    }
+
     @Override
     public void flush() throws IOException {
         synchronized (lock) {
             ensureOpen();
-            if (_hasLeftOver && _leftOverBuffer.position() == 1
-                    && _encoder.canFlushPending(_leftOverBuffer.get(0))) {
-                // Make a safely representable code unit visible before callers
-                // write directly to the wrapped writer. Other encoders retain
-                // their existing incomplete-sequence lookahead behavior.
-                flushLeftOver(null);
+            ensureNotBroken();
+            try {
+                if (_hasLeftOver && _leftOverBuffer.position() == 1
+                        && _encoder.canFlushPending(_leftOverBuffer.get(0))) {
+                    // Make a safely representable code unit visible before callers
+                    // write directly to the wrapped writer. Other encoders retain
+                    // their existing incomplete-sequence lookahead behavior.
+                    flushLeftOver(null);
+                }
+                flushBufferToWriter();
+                _out.flush();
+            } catch (IOException e) {
+                _broken = e;
+                throw e;
             }
-            flushBufferToWriter();
-            _out.flush();
         }
     }
 
@@ -264,8 +313,15 @@ public class EncodedWriter extends Writer {
             }
             _closed = true;
             try (Writer ignored = _out) {
-                flushLeftOver(null);
-                flushBufferToWriter();
+                if (_broken == null) {
+                    // A broken writer already reported its failure; flushing
+                    // its retained prefix now could duplicate accepted output.
+                    flushLeftOver(null);
+                    flushBufferToWriter();
+                }
+            } catch (IOException e) {
+                _broken = e;
+                throw e;
             }
         }
     }

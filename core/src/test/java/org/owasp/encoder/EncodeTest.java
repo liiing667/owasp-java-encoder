@@ -34,6 +34,7 @@
 
 package org.owasp.encoder;
 
+import java.io.Writer;
 import java.io.IOException;
 import java.io.StringWriter;
 import junit.framework.Test;
@@ -115,6 +116,77 @@ public class EncodeTest extends TestCase {
         StringWriter out = new StringWriter();
         Encode.forXml(out, null);
         assertEquals("null", out.toString());
+    }
+
+    /**
+     * A delegate that fails while the streaming Writer overload is draining
+     * its output buffer. It records every accepted chunk so the test can
+     * prove the failure is propagated (never hidden) and the accepted output
+     * stays an exact prefix of the one-shot encoding.
+     */
+    private static final class FailingAfterWritesWriter extends Writer {
+
+        private final StringBuilder output = new StringBuilder();
+        private int acceptedWrites;
+        private final int failAfterWrites;
+
+        FailingAfterWritesWriter(int failAfterWrites) {
+            this.failAfterWrites = failAfterWrites;
+        }
+
+        @Override
+        public void write(char[] cbuf, int off, int len) throws IOException {
+            if (acceptedWrites >= failAfterWrites) {
+                throw new IOException("delegate write failed");
+            }
+            output.append(cbuf, off, len);
+            ++acceptedWrites;
+        }
+
+        @Override
+        public void flush() {
+            // Nothing to do.
+        }
+
+        @Override
+        public void close() {
+            // Nothing to do.
+        }
+
+        @Override
+        public String toString() {
+            return output.toString();
+        }
+    }
+
+    public void testWriterOverloadPropagatesDelegateFailure() throws IOException {
+        String input = repeat("&", 8000);
+        FailingAfterWritesWriter out = new FailingAfterWritesWriter(2);
+        try {
+            Encode.forXml(out, input);
+            fail("Writer overload should propagate the delegate failure");
+        } catch (IOException expected) {
+            assertEquals("delegate write failed", expected.getMessage());
+        }
+
+        String accepted = out.toString();
+        String fullEncoding = Encode.forXml(input);
+        assertTrue("accepted output must be a prefix of the complete encoding",
+            fullEncoding.startsWith(accepted));
+        assertTrue("the failure must leave part of the stream unwritten",
+            accepted.length() < fullEncoding.length());
+        assertTrue("at least one batch must have been accepted", accepted.length() > 0);
+    }
+
+    public void testWriterOverloadPropagatesFailureOnFirstWrite() {
+        FailingAfterWritesWriter out = new FailingAfterWritesWriter(0);
+        try {
+            Encode.forXml(out, "<needs-encoding>");
+            fail("Writer overload should propagate the delegate failure");
+        } catch (IOException expected) {
+            assertEquals("delegate write failed", expected.getMessage());
+        }
+        assertEquals("", out.toString());
     }
 
     public void testEncodeString() {
