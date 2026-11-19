@@ -82,10 +82,14 @@ trusted output, as in the example above.
 
 CDATA
 preserves parsed XML text but can expand each `]` or `>` to 13 characters and
-can change SAX/StAX event boundaries. XML-comment encoding replaces every
-hyphen with `~` and therefore does not preserve comment text. Review snapshots,
-signatures, cache keys and code that inspects encoded bytes. Prefer Writer APIs
-for large or high-expansion CDATA values.
+can change SAX/StAX event boundaries. A complete `forCDATA` String or Writer
+call fails closed with `IllegalArgumentException` for values that contain no
+legal XML 1.0 representation (NUL and other illegal controls, unpaired
+surrogates, and Unicode noncharacters); the streaming `EncodedWriter` cannot
+roll back partial output and replaces such characters instead. XML-comment
+encoding replaces every hyphen with `~` and therefore does not preserve
+comment text. Review snapshots, signatures, cache keys and code that inspects
+encoded bytes. Prefer Writer APIs for large or high-expansion CDATA values.
 
 ## URLs
 

@@ -1029,9 +1029,13 @@ public final class Encode {
      * Each input {@code "]"} or {@code ">"} expands to thirteen output
      * characters; prefer the Writer overload for large values.
      * Invalid XML 1.0 characters and the additional controls and noncharacters
-     * described by {@link #forHtml(String)} are replaced by a space.
-     * XML parsers normalize line endings. The caller must provide the CDATA
-     * section boundaries.
+     * described by {@link #forHtml(String)} have no legal representation in a
+     * CDATA section; instead of silently changing the value, this method fails
+     * closed with an {@link IllegalArgumentException} before any output is
+     * built. The Writer overload and the streaming {@link EncodedWriter} keep
+     * their replacement-character behavior because a partial write cannot be
+     * rolled back. XML parsers normalize line endings. The caller must provide
+     * the CDATA section boundaries.
      *
      * <pre>
      *     &lt;xml-data&gt;&lt;![CDATA[&lt;%=Encode.forCDATA(...)%&gt;]]&gt;&lt;/xml-data&gt;
@@ -1039,8 +1043,16 @@ public final class Encode {
      *
      * @param input the input to encode
      * @return the encoded result
+     * @throws IllegalArgumentException if {@code input} contains a NUL, another
+     * illegal XML 1.0 character, an unpaired surrogate, or a Unicode
+     * noncharacter
      */
     public static String forCDATA(String input) {
+        if (input == null) {
+            // consistent with String.valueOf(...) use "null" for null.
+            input = "null";
+        }
+        Encoders.CDATA_ENCODER.rejectUnsafeContent(input);
         return encode(Encoders.CDATA_ENCODER, input);
     }
 
@@ -1052,10 +1064,16 @@ public final class Encode {
      * @param input the input string to encode
      * @throws NullPointerException if out is null
      * @throws IOException if thrown by writer
+     * @throws IllegalArgumentException if {@code input} contains a NUL, another
+     * illegal XML 1.0 character, an unpaired surrogate, or a Unicode
+     * noncharacter; no output is written when the argument is rejected
      */
     public static void forCDATA(Writer out, String input)
         throws IOException
     {
+        if (input != null) {
+            Encoders.CDATA_ENCODER.rejectUnsafeContent(input);
+        }
         encode(Encoders.CDATA_ENCODER, out, input);
     }
 

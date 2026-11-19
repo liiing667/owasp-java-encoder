@@ -94,6 +94,11 @@ public class TagEncodingTest extends EncodingTagTest {
 
     @Override
     protected void runTest() throws Exception {
+        if ("forCDATA".equals(facade.getName()) && input != null
+                && containsIllegalCdataContent(input)) {
+            assertCdataTagRejects();
+            return;
+        }
         String expected = input == null ? "null" : (String) facade.invoke(null, input);
         EncodingTag tag = tagClass.getConstructor().newInstance();
         tag.setJspContext(_pageContext);
@@ -105,6 +110,56 @@ public class TagEncodingTest extends EncodingTagTest {
             assertScriptContained("TLD function target", expected);
             assertScriptContained("tag", actual);
         }
+    }
+
+    private void assertCdataTagRejects() throws Exception {
+        try {
+            facade.invoke(null, input);
+            fail(getName() + ": facade accepted illegal CDATA input");
+        } catch (java.lang.reflect.InvocationTargetException expected) {
+            assertTrue(getName(),
+                expected.getCause() instanceof IllegalArgumentException);
+        }
+        EncodingTag tag = tagClass.getConstructor().newInstance();
+        tag.setJspContext(_pageContext);
+        tag.setValue(input);
+        try {
+            tag.doTag();
+            fail(getName() + ": tag accepted illegal CDATA input");
+        } catch (IllegalArgumentException expected) {
+            // fail-closed: the tag must propagate the rejection.
+        }
+        assertEquals(getName() + ": no partial output on rejection",
+            "", _response.getContentAsString());
+    }
+
+    /**
+     * Mirrors {@link org.owasp.encoder.CDATAEncoder}'s fail-closed rule so the
+     * shared tag fixtures can distinguish rejected values from encoded ones.
+     */
+    static boolean containsIllegalCdataContent(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch == ']' || ch == '>') {
+                continue;
+            }
+            if (ch <= 0x1f && ch != '\t' && ch != '\n' && ch != '\r') {
+                return true;
+            }
+            if (ch >= 0x7f && ch <= 0x9f && ch != 0x85) {
+                return true;
+            }
+            if (ch >= Character.MIN_SURROGATE && ch <= Character.MAX_SURROGATE) {
+                return true;
+            }
+            if (ch >= 0xfdd0 && ch <= 0xfdef) {
+                return true;
+            }
+            if ((ch & 0xfffe) == 0xfffe) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void assertScriptContained(String path, String encoded) {

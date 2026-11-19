@@ -84,7 +84,12 @@ public class EncodeFacadeTest extends TestCase {
     public void testFacadeDelegation() throws Exception {
         for (EncoderContexts context : EncoderContexts.ALL) {
             for (String input : new String[] {null, "", "plain text", EncoderContexts.probe()}) {
-                assertFacade(context, input);
+                if (Encoders.CDATA.equals(context.name) && input != null
+                        && containsIllegalCdataContent(input)) {
+                    assertFacadeRejects(context, input);
+                } else {
+                    assertFacade(context, input);
+                }
             }
             // Place unsafe text and surrogate pairs on both sides of buffer boundaries.
             for (int size : new int[] {1023, 1024, 1025, 2047, 2048, 2049}) {
@@ -92,9 +97,64 @@ public class EncodeFacadeTest extends TestCase {
                 Arrays.fill(padding, 'a');
                 // NUL requires encoding in every context, bypassing the safe
                 // prefix fast path; the high surrogate starts at index size.
-                assertFacade(context, "\0" + new String(padding) + "\ud83d\ude00" + EncoderContexts.probe());
+                String input = "\0" + new String(padding) + "\ud83d\ude00" + EncoderContexts.probe();
+                if (Encoders.CDATA.equals(context.name)) {
+                    assertFacadeRejects(context, input);
+                } else {
+                    assertFacade(context, input);
+                }
             }
         }
+    }
+
+    /**
+     * Mirrors {@link org.owasp.encoder.CDATAEncoder}'s fail-closed rule so the
+     * generic facade probe can distinguish rejected values from encoded ones.
+     */
+    private static boolean containsIllegalCdataContent(String input) {
+        for (int i = 0; i < input.length(); i++) {
+            char ch = input.charAt(i);
+            if (ch == ']' || ch == '>') {
+                continue;
+            }
+            if (ch <= 0x1f && ch != '\t' && ch != '\n' && ch != '\r') {
+                return true;
+            }
+            if (ch >= 0x7f && ch <= 0x9f && ch != 0x85) {
+                return true;
+            }
+            if (ch >= Character.MIN_SURROGATE && ch <= Character.MAX_SURROGATE) {
+                return true;
+            }
+            if (ch >= 0xfdd0 && ch <= 0xfdef) {
+                return true;
+            }
+            if ((ch & 0xfffe) == 0xfffe) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void assertFacadeRejects(EncoderContexts context, String input) throws Exception {
+        Method stringMethod = Encode.class.getMethod(context.method, String.class);
+        Method writerMethod = Encode.class.getMethod(context.method, Writer.class, String.class);
+        try {
+            stringMethod.invoke(null, (Object) input);
+            fail(context.method + " String accepted illegal input");
+        } catch (java.lang.reflect.InvocationTargetException expected) {
+            assertTrue(context.method,
+                expected.getCause() instanceof IllegalArgumentException);
+        }
+        StringWriter out = new StringWriter();
+        try {
+            writerMethod.invoke(null, out, input);
+            fail(context.method + " Writer accepted illegal input");
+        } catch (java.lang.reflect.InvocationTargetException expected) {
+            assertTrue(context.method,
+                expected.getCause() instanceof IllegalArgumentException);
+        }
+        assertEquals("rejection must leave the writer untouched", "", out.toString());
     }
 
     private void assertFacade(EncoderContexts context, String input) throws Exception {

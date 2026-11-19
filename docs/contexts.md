@@ -47,7 +47,12 @@ Use the facade Writer overload when encoding one String directly.
   To remain safe next to trusted literal text, CDATA represents every `]` and
   `>` with close/reopen sequences, and XML comments replace every input hyphen
   with `~`.
-  Invalid-character replacement and XML line-ending normalization can change data.
+  CDATA String and Writer calls fail closed with `IllegalArgumentException` for
+  values that have no legal XML 1.0 representation (NUL and other controls,
+  unpaired surrogates, and Unicode noncharacters) instead of silently replacing
+  them; validate or reject such input before calling. The streaming
+  `EncodedWriter` cannot roll back a partial write and keeps its replacement
+  behavior. XML line-ending normalization can still change parsed data.
 - Java source: `forJava` encodes string-literal content for a code generator,
   not JavaScript or JSON. Supply Java quotes; malformed surrogate input is not
   guaranteed to produce compilable source. This API has no JSP tag/function.
@@ -130,10 +135,15 @@ documented contexts. Source spelling and output size can change substantially
 even when the evaluated value is unchanged.
 
 CDATA has the same fragment-composition guarantee for `]]>` and preserves the
-XML parser's text value, subject to the existing invalid-character replacement
-and line-ending normalization policies. Its output can expand to thirteen
-characters for each input `]` or `>` and may be reported as multiple CDATA/text
-events. XML-comment encoding is deliberately lossy: every input hyphen becomes
+XML parser's text value, subject to line-ending normalization. A complete
+`forCDATA` String or Writer call fails closed with
+`IllegalArgumentException` when the value contains a character with no legal
+XML 1.0 representation (NUL and other illegal controls, unpaired surrogates,
+and Unicode noncharacters), so no alternative document can be emitted; the
+streaming `EncodedWriter`, whose partial writes cannot be rolled back, keeps
+replacing those characters. Its output can expand to thirteen characters for
+each input `]` or `>` and may be reported as multiple CDATA/text events.
+XML-comment encoding is deliberately lossy: every input hyphen becomes
 `~`. Trusted text on either side must itself be legal in the selected context;
 the guarantee prevents the encoded fragment from completing a parser token.
 

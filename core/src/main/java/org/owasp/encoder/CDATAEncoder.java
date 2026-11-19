@@ -48,6 +48,14 @@ import java.nio.charset.CoderResult;
  * data is preserved, but a streaming XML consumer must handle multiple CDATA
  * and character-data events.
  *
+ * <p>The close/reopen spellings keep every emitted fragment inside its CDATA
+ * context, but they can never make an illegal character representable: a NUL,
+ * an unpaired surrogate, a control code or a Unicode noncharacter has no legal
+ * parsed value in XML 1.0. Streaming callers therefore receive the documented
+ * replacement character, while the fixed String facade calls
+ * {@link #rejectUnsafeContent} up front and fails closed instead of silently
+ * changing the data.</p>
+ *
  * @author Jeff Ichnowski
  */
 class CDATAEncoder extends Encoder {
@@ -68,6 +76,56 @@ class CDATAEncoder extends Encoder {
 
     /** Length of {@link #GREATER_THAN_ENCODED}. */
     private static final int GREATER_THAN_ENCODED_LENGTH = 13;
+
+    /**
+     * Fails closed when a complete value cannot be represented safely in a
+     * CDATA section. The {@code "]"} and {@code ">"} spellings emitted by
+     * {@link #encodeArrays} already neutralize a {@code "]]>"} terminator,
+     * including one split across the trusted/encoded boundary; this check
+     * instead rejects content that has no legal XML 1.0 representation at all.
+     * It is used by the fixed String facade before any output is produced, so
+     * a rejection is atomic and never emits a partial, alternative document.
+     *
+     * @param input the complete value the caller intends to encode
+     * @throws IllegalArgumentException if {@code input} contains a NUL, another
+     * illegal XML 1.0 character, an unpaired surrogate, or a Unicode
+     * noncharacter
+     */
+    void rejectUnsafeContent(String input) {
+        final int n = input.length();
+        for (int i = 0; i < n; ++i) {
+            char ch = input.charAt(i);
+            if (ch <= Unicode.MAX_ASCII) {
+                if (ch == ']' || ch == '>'
+                        || ch >= ' ' || ch == '\n' || ch == '\r' || ch == '\t') {
+                    continue;
+                }
+            } else if (ch < Character.MIN_HIGH_SURROGATE) {
+                if (ch > Unicode.MAX_C1_CTRL_CHAR || ch == Unicode.NEL) {
+                    continue;
+                }
+            } else if (ch <= Character.MAX_HIGH_SURROGATE) {
+                if (i + 1 < n && Character.isLowSurrogate(input.charAt(i + 1))) {
+                    int codePoint = Character.toCodePoint(ch, input.charAt(i + 1));
+                    if (!Unicode.isNonCharacter(codePoint)) {
+                        ++i;
+                        continue;
+                    }
+                }
+            } else if (// low surrogate without a preceding high surrogate,
+                    // or a BMP noncharacter: both have no legal value.
+                    ch <= Character.MAX_LOW_SURROGATE
+                    || ch > '\ufffd'
+                    || ('\ufdd0' <= ch && ch <= '\ufdef')) {
+                // fall through to the rejection below
+            } else {
+                continue;
+            }
+            throw new IllegalArgumentException(
+                "CDATA input contains an illegal XML 1.0 character at index "
+                    + i + ": 0x" + Integer.toHexString(ch));
+        }
+    }
 
     @Override
     protected int maxEncodedLength(int n) {

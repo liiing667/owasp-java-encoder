@@ -8,6 +8,15 @@ unchanged. [1.6.0 is available from Central](releases/1.6.0-central-publication.
 
 ## Unreleased
 
+- Make `Encode.forCDATA` fail closed. The String and Writer facades now throw
+  `IllegalArgumentException` before producing any output when the complete
+  value contains a NUL or another illegal XML 1.0 control, an unpaired
+  surrogate, or a Unicode noncharacter, instead of silently replacing it with
+  a space and risking an unintended document. The `]]>` boundary splitting and
+  the close/reopen spellings for `]` and `>` are unchanged, so legal CDATA
+  values remain parseable and preserve their parsed text. The streaming
+  `EncodedWriter`, whose partial writes cannot be rolled back, retains its
+  replacement-character policy.
 - Remove retired Maven Site sources and archive September maintenance records.
 - Refresh build/dependency documentation and clarify the 1.6.0 review record.
   Encoding behavior, public APIs, and published artifacts are unchanged.

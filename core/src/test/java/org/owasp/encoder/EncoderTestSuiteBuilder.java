@@ -469,6 +469,54 @@ public class EncoderTestSuiteBuilder {
     }
 
     /**
+     * Creates and adds a test suite for invalid characters that the public
+     * String facade must reject instead of replacing. Used by fail-closed
+     * contexts such as CDATA, where emitting a replacement would silently
+     * change a value that has no legal representation.
+     *
+     * @return this
+     */
+    public EncoderTestSuiteBuilder invalidRejectionSuite() {
+        assert _encoded.cardinality() + _invalid.cardinality() + _valid.cardinality()
+            == Character.MAX_CODE_POINT + 1;
+
+        TestSuite suite = new TestSuite("invalid-rejection");
+        int min = _invalid.nextSetBit(0);
+        while (min != -1) {
+            int max = _invalid.nextClearBit(min + 1);
+            if (max < 0) {
+                max = Character.MAX_CODE_POINT + 1;
+            }
+            final int finalMin = min;
+            final int finalMax = max;
+            suite.addTest(new TestCase(String.format("U+%04x..U+%04X", finalMin, finalMax - 1)) {
+                @Override
+                protected void runTest() throws Throwable {
+                    char[] chars = new char[2];
+                    for (int i = finalMin; i < finalMax; ++i) {
+                        String input = new String(chars, 0, Character.toChars(i, chars, 0));
+                        assertRejected(input);
+                        assertRejected("safe-" + input + "-tail");
+                    }
+                }
+            });
+            min = _invalid.nextSetBit(max + 1);
+        }
+
+        return add(suite);
+    }
+
+    private void assertRejected(String input) {
+        try {
+            String actual = Encode.forCDATA(input);
+            Assert.fail("illegal input was not rejected: "
+                + debugEncode(input) + " actual=" + debugEncode(actual));
+        } catch (IllegalArgumentException expected) {
+            // The fail-closed facade must reject the whole value.
+        }
+    }
+
+    /**
      * Creates and adds a test suite for characters that are encoded.  Must
      * be called after telling the builder which characters are valid,
      * invalid, and encoded.  The added suite simply tests that encoded

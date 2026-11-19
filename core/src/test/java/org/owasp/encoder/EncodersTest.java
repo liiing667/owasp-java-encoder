@@ -56,13 +56,28 @@ public class EncodersTest extends TestCase {
             assertSame(context.name + " singleton", actual, Encoders.forName(context.name));
             // Compare against an independently constructed encoder so a facade and
             // registry wired to the same wrong singleton cannot agree accidentally.
-            assertEquals(context.name, Encode.encode(context.encoder, EncoderContexts.probe()),
-                Encode.encode(actual, EncoderContexts.probe()));
+            // CDATA fails closed on the probe's illegal code points; exercise it
+            // with a legal value and verify the rejection separately.
+            String probe = Encoders.CDATA.equals(context.name)
+                ? "legal ]> probe \ud83d\ude00" : EncoderContexts.probe();
+            assertEquals(context.name, Encode.encode(context.encoder, probe),
+                Encode.encode(actual, probe));
             if (actual instanceof XMLEncoder || actual instanceof JavaScriptEncoder
                     || actual instanceof CSSEncoder || actual instanceof URIEncoder) {
                 assertEquals(context.name + " mode/version", context.encoder.toString(), actual.toString());
             }
         }
+    }
+
+    public void testCdataRegistryFailsClosedLikeTheFacade() {
+        try {
+            Encode.forCDATA(EncoderContexts.probe());
+            fail("CDATA facade accepted an illegal probe");
+        } catch (IllegalArgumentException expected) {
+            // The registry singleton must apply the same fail-closed rule.
+        }
+        Encoder encoder = Encoders.forName(Encoders.CDATA);
+        assertTrue(encoder instanceof CDATAEncoder);
     }
 
     public void testNullContext() {

@@ -76,6 +76,25 @@ public class EncodedWriterTest {
     }
 
     @Test(timeout = 5000)
+    public void cdataStreamingReplacesIllegalCharactersWhileFacadeRejects()
+            throws IOException {
+        // The fixed String facade fails closed; the streaming writer cannot
+        // roll back a partial write, so it keeps the replacement policy.
+        try {
+            Encode.forCDATA("a\0b");
+            fail("String facade must reject a NUL");
+        } catch (IllegalArgumentException expected) {
+            // fail-closed facade
+        }
+
+        StringWriter out = new StringWriter();
+        EncodedWriter writer = new EncodedWriter(out, Encoders.CDATA);
+        writer.write("a\0b\ud800c\ufffed");
+        writer.close();
+        assertEquals("a b c d", out.toString());
+    }
+
+    @Test(timeout = 5000)
     public void xmlCommentTerminatorSplitAcrossFullBufferStaysEncoded() throws IOException {
         StringWriter out = new StringWriter();
         EncodedWriter writer = new EncodedWriter(out, Encoders.XML_COMMENT);
