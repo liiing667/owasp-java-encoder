@@ -58,6 +58,15 @@ class PackagedWarIT {
             assertEquals(Encode.forHtml("fancy <script>alert(1)</script>"), cell(page.body(), "c2"));
             assertFalse(page.body().contains("<script>"));
             assertTrue(page.body().contains("<!DOCTYPE html>"));
+            var jsonBlock = Pattern.compile(
+                "<script type=\"application/json\" id=\"items-json\">([^<]*)</script>")
+                .matcher(page.body());
+            assertTrue(jsonBlock.find(), () -> "Missing items-json block: " + page.body());
+            String json = jsonBlock.group(1);
+            assertTrue(json.chars().noneMatch(ch -> ch < 0x20),
+                () -> "Raw control character in JSON block: " + json);
+            assertTrue(json.contains("\\u2028"), json);
+            assertTrue(json.contains("\\u0000"), json);
         } finally {
             server.destroy();
             if (!server.waitFor(5, TimeUnit.SECONDS)) {

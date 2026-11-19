@@ -21,14 +21,20 @@ and invalid JSP translation. They cannot replace these browser assertions:
 
 - `ItemControllerTest`: JSP/JSTL startup, tag and EL output interpreted as text in
   actual DOM cells, no injected script elements, standards-mode HTML.
+  The page also embeds the items as one `application/json` document in which
+  every string value is encoded with `forJson`: fixed nested-JSON fixtures
+  (backslash, quote, escaped controls, raw U+2028/U+2029) round-trip through
+  `JSON.parse` to the identical strings, legal JSON text is preserved, and raw
+  control characters never appear because a strict parser rejects them.
 - `JavaScriptTemplateTest`: all four JavaScript encoders through quoted strings
   and ordinary template literals, interpolation boundaries, HTML script and
   event-attribute parsing, controls and lone surrogates through UTF-8, and the
   explicitly unsupported raw-template round-trip behavior.
 - `PackagedWarIT`: launches `java -jar` on the finished executable WAR on a
   random loopback port, renders both packaged views, checks exact encoded cell
-  content, and confirms JSTL API/implementation and adapter JARs are packaged.
-  It terminates the server even on failure. This test needs no Docker.
+  content, confirms the embedded JSON block carries escapes instead of raw
+  control characters, and confirms JSTL API/implementation and adapter JARs are
+  packaged. It terminates the server even on failure. This test needs no Docker.
 
 Browser sessions and containers are explicitly closed in `AfterAll` with
 `finally` cleanup. Video recording is disabled, so no unused recorder image is

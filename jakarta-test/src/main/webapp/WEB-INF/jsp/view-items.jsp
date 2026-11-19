@@ -26,5 +26,10 @@
                 </c:forEach>
             </tbody>
         </table>
+        <%-- Items again as one JSON document: every string value is encoded
+             with forJson, so the block stays inside this script element and
+             JSON.parse returns the identical strings. The JSON text contains
+             no raw control characters; keep it on a single line. --%>
+        <script type="application/json" id="items-json">[<c:forEach items="${items}" var="item" varStatus="status">{"id":${item.id},"name":"${e:forJson(item.name)}","description":"${e:forJson(item.description)}"}<c:if test="${!status.last}">,</c:if></c:forEach>]</script>
     </body>
 </html>

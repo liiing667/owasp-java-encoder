@@ -49,9 +49,27 @@ import org.springframework.web.bind.annotation.RequestMapping;
 @RequestMapping("/item")
 public class ItemController {
 
+    /**
+     * Fixed nested-JSON fixture: this description is itself legal JSON text
+     * whose values hold a backslash, a quote, the escaped control characters
+     * and the raw Unicode line separators U+2028 and U+2029.
+     */
+    private static final String NESTED_JSON
+        = "{\"backslash\":\"\\\\\",\"quote\":\"\\\"\","
+        + "\"controls\":\"\\b\\t\\n\\f\\r\","
+        + "\"lineSeparator\":\"\u2028\",\"paragraphSeparator\":\"\u2029\"}";
+
+    /**
+     * Raw control characters are illegal in JSON text; the encoder must
+     * escape them so the page never emits one (fail closed).
+     */
+    private static final String RAW_CONTROLS = "raw\u0000\u0001\u001fcontrols";
+
     private static final List<Item> ITEMS = List.of(
         new Item(1, "menu", "blob"),
-        new Item(2, "top<script>alert(1)</script>", "fancy <script>alert(1)</script>"));
+        new Item(2, "top<script>alert(1)</script>", "fancy <script>alert(1)</script>"),
+        new Item(3, "nested-json", NESTED_JSON),
+        new Item(4, "raw-controls", RAW_CONTROLS));
 
     @GetMapping("/viewItems")
     public String viewItems(Model model) {
