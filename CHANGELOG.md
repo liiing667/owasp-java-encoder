@@ -8,6 +8,12 @@ unchanged. [1.6.0 is available from Central](releases/1.6.0-central-publication.
 
 ## Unreleased
 
+- Fail closed on carriage return in the XML 1.1 encoders. `forXml11`,
+  `forXml11Content` and `forXml11Attribute` now emit CR as the character
+  reference `&#x0d;` instead of a literal CR, because an XML 1.1 processor
+  normalizes a literal CR to LF and would otherwise see a different character
+  than the one that was encoded. Tab and LF still pass through unencoded, and
+  XML 1.0 output is unchanged.
 - Remove retired Maven Site sources and archive September maintenance records.
 - Refresh build/dependency documentation and clarify the 1.6.0 review record.
   Encoding behavior, public APIs, and published artifacts are unchanged.

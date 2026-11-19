@@ -85,10 +85,11 @@ public class XML11EncoderTest extends TestCase {
                 .encode("control-char-0x80", "&#x80;", "\u0080")
                 .encode("control-char-0x9F", "&#x9f;", "\u009F")
                 
-                // Tab, LF, CR are still passed through unencoded
+                // Tab and LF are still passed through unencoded; CR is encoded
+                // because an XML 1.1 processor normalizes a literal CR to LF
                 .encode("tab-char", "\t", "\t")
                 .encode("lf-char", "\n", "\n")
-                .encode("cr-char", "\r", "\r")
+                .encode("cr-char", "&#x0d;", "\r")
                 
                 // XML 1.1 normalizes NEL (0x85) and LS (0x2028) to LF, so they are encoded
                 .encode("nel-char", "&#x85;", "\u0085")
@@ -100,7 +101,8 @@ public class XML11EncoderTest extends TestCase {
 
             // Define the complete partition before generating the range sweeps.
             builder.encoded(0x01, 0x1f)
-                .valid("\t\r\n")
+                .valid("\t\n")
+                .encoded("\r")
                 .valid(' ', Character.MAX_CODE_POINT)
                 .encoded(0x7f, 0x9f)
                 .encoded("\u2028")
@@ -209,22 +211,25 @@ public class XML11EncoderTest extends TestCase {
     }
 
     /**
-     * Test that tab, lf, and cr are not encoded in XML 1.1.
+     * Test that tab and lf are not encoded in XML 1.1, but cr is encoded
+     * because an XML 1.1 processor normalizes a literal cr to lf.
      */
     public void testXML11AllowedControlChars() {
-        String input = "a\tb\nc\rd";
-        String result = Encode.forXml11(input);
-        assertEquals("a\tb\nc\rd", result);
+        assertEquals("a\tb\nc", Encode.forXml11("a\tb\nc"));
+        assertEquals("a&#x0d;b", Encode.forXml11("a\rb"));
+        assertEquals("a&#x0d;&#x0d;b", Encode.forXml11("a\r\rb"));
+        // a cr-lf pair must keep both characters through parsing
+        assertEquals("a&#x0d;\nb", Encode.forXml11("a\r\nb"));
     }
     
     /**
-     * Test that C0 control characters (except tab, lf, cr) are encoded in XML 1.1.
+     * Test that C0 control characters (except tab and lf) are encoded in XML 1.1.
      */
     public void testXML11C0ControlChars() {
         // Test each C0 control character
         for (int i = 1; i <= 0x1F; i++) {
-            if (i == 0x09 || i == 0x0A || i == 0x0D) {
-                // Tab, LF, CR should not be encoded
+            if (i == 0x09 || i == 0x0A) {
+                // Tab and LF should not be encoded
                 continue;
             }
             char ch = (char) i;
@@ -280,11 +285,96 @@ public class XML11EncoderTest extends TestCase {
     }
 
     /**
+     * Test that XML 1.0 behavior for CR is unchanged (passed through), while
+     * XML 1.1 encodes it.  This pins the version-dependent fail-closed split:
+     * the same input is treated according to the selected XML version.
+     */
+    public void testCRHandlingDependsOnVersion() {
+        assertEquals("a\rb", Encode.forXml("a\rb"));
+        assertEquals("a&#x0d;b", Encode.forXml11("a\rb"));
+        assertEquals("a&#x0d;b", Encode.forXml11Content("a\rb"));
+        assertEquals("a&#x0d;b", Encode.forXml11Attribute("a\rb"));
+    }
+
+    /**
+     * Pinned boundary matrix for the XML 1.1 encoder: each boundary of the
+     * character classification is shown with its expected output, including
+     * the rejections (invalid characters replaced with a space).
+     */
+    public void testXML11BoundaryMatrix() {
+        String[][] matrix = {
+            // C0 controls: null rejected, restricted chars encoded, tab/lf valid
+            {"\u0000", " "},
+            {"\u0001", "&#x01;"},
+            {"\u0008", "&#x08;"},
+            {"\t", "\t"},
+            {"\n", "\n"},
+            {"\u000b", "&#x0b;"},
+            {"\u000c", "&#x0c;"},
+            {"\r", "&#x0d;"},
+            {"\u000e", "&#x0e;"},
+            {"\u001f", "&#x1f;"},
+            {"\u0020", "\u0020"},
+            // DEL and C1 controls: all encoded, including NEL
+            {"\u007f", "&#x7f;"},
+            {"\u0084", "&#x84;"},
+            {"\u0085", "&#x85;"},
+            {"\u0086", "&#x86;"},
+            {"\u009f", "&#x9f;"},
+            {"\u00a0", "\u00a0"},
+            // line separator encoded, paragraph separator valid
+            {"\u2028", "&#x2028;"},
+            {"\u2029", "\u2029"},
+            // BMP boundaries around the surrogate range
+            {"\ud7ff", "\ud7ff"},
+            {"\ue000", "\ue000"},
+            // BMP noncharacters: boundary chars kept, noncharacters rejected
+            {"\ufdcf", "\ufdcf"},
+            {"\ufdd0", " "},
+            {"\ufdef", " "},
+            {"\ufdf0", "\ufdf0"},
+            {"\ufffd", "\ufffd"},
+            {"\ufffe", " "},
+            {"\uffff", " "},
+            // supplementary characters: valid pairs pass through
+            {"\ud800\udc00", "\ud800\udc00"},
+            {"\ud83f\udffd", "\ud83f\udffd"},
+            {"\udbff\udffd", "\udbff\udffd"},
+            // supplementary noncharacters rejected (one space per pair)
+            {"\ud83f\udffe", " "},
+            {"\ud83f\udfff", " "},
+            {"\udbff\udffe", " "},
+            {"\udbff\udfff", " "},
+        };
+        for (String[] row : matrix) {
+            assertEquals("input " + describe(row[0]),
+                row[1], Encode.forXml11(row[0]));
+        }
+        // lone surrogates are rejected individually
+        assertEquals(" ", Encode.forXml11("\ud800"));
+        assertEquals(" ", Encode.forXml11("\udfff"));
+        assertEquals("a b", Encode.forXml11("a\ud800b"));
+        assertEquals("a b", Encode.forXml11("a\udc00b"));
+        // high surrogate followed by a valid pair: first rejected, pair kept
+        assertEquals(" \ud800\udc00", Encode.forXml11("\ud800\ud800\udc00"));
+        // null is rejected even though other C0 controls are encodable
+        assertEquals(" ", Encode.forXml11("\u0000"));
+    }
+
+    private static String describe(String s) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            b.append(String.format("U+%04X ", (int) s.charAt(i)));
+        }
+        return b.toString().trim();
+    }
+
+    /**
      * Verify that a real XML 1.1 parser preserves the referenced characters in
      * content and both attribute quote styles, for String and Writer APIs.
      */
     public void testXML11ParserRoundTrip() throws Exception {
-        String input = "a\u0085b\u2028c\u2029d&<>\"'";
+        String input = "a\u0085b\u2028c\u2029d&<>\"'e\rf";
         assertXML11RoundTrip(input, Encode.forXml11(input), Encode.forXml11(input));
         assertXML11RoundTrip(input, Encode.forXml11Content(input), Encode.forXml11Attribute(input));
 

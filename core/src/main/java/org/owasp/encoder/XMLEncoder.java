@@ -62,6 +62,10 @@ class XMLEncoder extends Encoder {
     // U+007f .. U+009F <-- U+85 = NEL (next line) = CR+LF in one = ok in
     // XML 1.0, but normalized to LF by XML 1.1 (as is U+2028), so
     // XML 1.1 output uses character references for both.
+    // Note: a literal CR (U+000D) is normalized to LF by XML 1.1 (and
+    // XML 1.0) processors, so XML 1.1 output uses a character reference
+    // for it as well; otherwise the parser sees a different character
+    // than the one that was encoded.
     // Note: the standard says it is a good practice to replace noncharacters
     // with U+FFFD "replacement character".
     /**
@@ -114,11 +118,11 @@ class XMLEncoder extends Encoder {
          */
         XML_1_0,
         /**
-         * XML 1.1 - control characters (except tab, lf, cr) are encoded as character references.
+         * XML 1.1 - control characters (except tab and lf) are encoded as character references.
          * All chars [#x1-#x10FFFF] are allowed (excluding noncharacters).
          * Restricted chars [#x1-#x8, #xB-#xC, #xE-#x1F, #x7F-#x84, #x86-#x9F] must be encoded.
-         * NEL (#x85) and LINE SEPARATOR (#x2028) are also encoded, because an XML 1.1
-         * processor normalizes them to #xA when they appear literally.
+         * CR (#xD), NEL (#x85) and LINE SEPARATOR (#x2028) are also encoded, because an
+         * XML 1.1 processor normalizes them to #xA when they appear literally.
          */
         XML_1_1
     }
@@ -234,7 +238,13 @@ class XMLEncoder extends Encoder {
     XMLEncoder(Mode mode, Version version) {
         _mode = mode;
         _version = version;
-        _validMask = mode.validMask();
+        long validMask = mode.validMask();
+        if (version == Version.XML_1_1) {
+            // A literal CR is normalized to LF by XML 1.1 processors, so it
+            // must be encoded as a character reference to survive parsing.
+            validMask &= ~(1L << '\r');
+        }
+        _validMask = validMask;
     }
 
     @Override
@@ -371,7 +381,8 @@ class XMLEncoder extends Encoder {
                         default:
                             // invalid character for XML 1.0
                             if (_version == Version.XML_1_1 && ch != 0) {
-                                // In XML 1.1, encode C0 control characters (except null) as character references
+                                // In XML 1.1, encode C0 control characters (except null) and
+                                // CR as character references
                                 if (j + CONTROL_CHAR_REF_LENGTH > m) {
                                     return overflow(input, i, output, j);
                                 }

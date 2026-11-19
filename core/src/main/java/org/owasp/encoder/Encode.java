@@ -931,12 +931,11 @@ public final class Encode {
      * follows the XML 1.1 specification which allows all control characters
      * (except null) to be encoded as character references.  This method encodes
      * control characters in the ranges [#x1-#x8, #xB-#xC, #xE-#x1F, #x7F-#x84, #x86-#x9F]
-     * as character references (e.g., {@code &#x01;}), while tab, line feed,
-     * and carriage return pass through unencoded, though XML parsing may
-     * normalize them. NEL ({@code U+0085})
-     * and line separator ({@code U+2028}) are also encoded, as {@code &#x85;}
-     * and {@code &#x2028;}, because an XML 1.1 processor would otherwise
-     * normalize them to a line feed.  This is safe for use
+     * as character references (e.g., {@code &#x01;}), while tab and line feed
+     * pass through unencoded.  Carriage return, NEL ({@code U+0085})
+     * and line separator ({@code U+2028}) are also encoded, as {@code &#x0d;},
+     * {@code &#x85;} and {@code &#x2028;}, because an XML 1.1 processor would
+     * otherwise normalize them to a line feed.  This is safe for use
      * in both XML 1.1 content and attributes.
      *
      * @param input the input to encode
