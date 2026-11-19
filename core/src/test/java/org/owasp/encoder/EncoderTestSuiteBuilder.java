@@ -469,6 +469,59 @@ public class EncoderTestSuiteBuilder {
     }
 
     /**
+     * Creates and adds a test suite for invalid characters on fail-closed
+     * encoders. Every invalid code point must make both encoding facades and
+     * the low-level buffer API throw {@link EncodingException} instead of
+     * emitting a replacement character.
+     *
+     * @return this
+     */
+    public EncoderTestSuiteBuilder rejectSuite() {
+        assert _encoded.cardinality() + _invalid.cardinality() + _valid.cardinality() == Character.MAX_CODE_POINT + 1;
+
+        TestSuite suite = new TestSuite("reject");
+        int min = _invalid.nextSetBit(0);
+        while (min != -1) {
+            int max = _invalid.nextClearBit(min + 1);
+            if (max < 0) {
+                max = Character.MAX_CODE_POINT + 1;
+            }
+            final int finalMin = min;
+            final int finalMax = max;
+            suite.addTest(new TestCase(String.format("reject U+%04x..U+%04X", finalMin, finalMax - 1)) {
+                @Override
+                protected void runTest() throws Throwable {
+                    char[] chars = new char[2];
+                    for (int cp = finalMin; cp < finalMax; ++cp) {
+                        String input = new String(chars, 0,
+                            Character.toChars(cp, chars, 0));
+                        try {
+                            Encode.encode(_encoder, input);
+                            fail("fail-closed encoder accepted "
+                                + debugEncode(input));
+                        } catch (EncodingException expected) {
+                            // Required: invalid input is never replaced.
+                        }
+
+                        CharBuffer in = CharBuffer.wrap(input.toCharArray());
+                        CharBuffer out = CharBuffer.allocate(16);
+                        try {
+                            _encoder.encode(in, out, true);
+                            fail("low-level encoder accepted "
+                                + debugEncode(input));
+                        } catch (EncodingException expected) {
+                            // Required.
+                        }
+                    }
+                }
+            });
+            min = _invalid.nextSetBit(max + 1);
+        }
+
+        return add(suite);
+    }
+
+    /**
      * Creates and adds a test suite for characters that are encoded.  Must
      * be called after telling the builder which characters are valid,
      * invalid, and encoded.  The added suite simply tests that encoded

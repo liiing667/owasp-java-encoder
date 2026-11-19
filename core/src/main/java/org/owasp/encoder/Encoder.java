@@ -174,6 +174,10 @@ public abstract class Encoder {
      * input has remaining characters
      * @throws UnsupportedOperationException if input has remaining characters
      * and either buffer does not expose a backing array
+     * @throws EncodingException if a fail-closed encoder (CDATA) encounters
+     * input its target context cannot represent, such as a literal CDATA
+     * terminator or an illegal XML character; replacement-based encoders
+     * never throw this exception
      */
     public CoderResult encode(CharBuffer input, CharBuffer output, boolean endOfInput) {
         if (input.hasRemaining()) {
@@ -255,6 +259,21 @@ public abstract class Encoder {
      */
     boolean canFlushPending(char ch) {
         return false;
+    }
+
+    /**
+     * Validates a complete logical input string before encoding begins.
+      * Encoders that fail closed on input their target context cannot
+      * represent override this method and throw {@link EncodingException} for
+      * sequences that would otherwise change the value or leave the context.
+      * The default implementation accepts every input, preserving the
+      * replacement-based behavior of the other encoders.
+      *
+      * @param input the complete string supplied to an encoding facade
+      * @throws EncodingException if the input cannot be encoded safely
+      */
+    void validateInput(String input) {
+        // Default encoders replace rather than reject.
     }
 
     /**

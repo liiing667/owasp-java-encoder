@@ -8,6 +8,17 @@ unchanged. [1.6.0 is available from Central](releases/1.6.0-central-publication.
 
 ## Unreleased
 
+- Make `Encode.forCDATA` fail closed instead of replacing characters. The
+  CDATA encoder now throws the new public `org.owasp.encoder.EncodingException`
+  for a literal `]]>` sequence (including one split across streaming writes),
+  illegal XML 1.0 characters such as NUL and disallowed C1 controls, unpaired
+  UTF-16 surrogates, and Unicode noncharacters. Rejection occurs before any
+  output is written, so a failed call cannot produce a partial or alternate
+  document. Accepted CDATA input remains parseable and preserves the parsed
+  character data, subject to XML line-ending normalization. This is a behavior
+  change for callers that previously relied on space replacement; catch
+  `EncodingException` to handle unencodable values explicitly. The new exception
+  class is an additive, source- and binary-compatible public API change.
 - Remove retired Maven Site sources and archive September maintenance records.
 - Refresh build/dependency documentation and clarify the 1.6.0 review record.
   Encoding behavior, public APIs, and published artifacts are unchanged.

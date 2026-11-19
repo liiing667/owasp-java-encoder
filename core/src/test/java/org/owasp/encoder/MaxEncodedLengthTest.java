@@ -75,7 +75,15 @@ public class MaxEncodedLengthTest {
     private static void assertWithinBound(String name, Encoder encoder, char[] input) {
         CharBuffer in = CharBuffer.wrap(input);
         CharBuffer out = CharBuffer.allocate(input.length * 32);
-        assertTrue(encoder.encode(in, out, true).isUnderflow());
+        try {
+            if (!encoder.encode(in, out, true).isUnderflow()) {
+                fail(name + ": encoder did not finish " + escape(input));
+            }
+        } catch (EncodingException rejected) {
+            // Fail-closed contexts (CDATA) reject illegal input instead of
+            // emitting output, so no encoded-length bound applies.
+            return;
+        }
         int bound = encoder.maxEncodedLength(input.length);
         if (out.position() > bound) {
             fail(name + ": " + escape(input) + " encoded to " + out.position()

@@ -47,7 +47,10 @@ Use the facade Writer overload when encoding one String directly.
   To remain safe next to trusted literal text, CDATA represents every `]` and
   `>` with close/reopen sequences, and XML comments replace every input hyphen
   with `~`.
-  Invalid-character replacement and XML line-ending normalization can change data.
+  CDATA fails closed: a literal `]]>`, an illegal XML 1.0 character such as NUL,
+  an unpaired surrogate, or a noncharacter makes `forCDATA` throw
+  `EncodingException` instead of replacing data. XML line-ending normalization
+  can still change parsed line endings.
 - Java source: `forJava` encodes string-literal content for a code generator,
   not JavaScript or JSON. Supply Java quotes; malformed surrogate input is not
   guaranteed to produce compilable source. This API has no JSP tag/function.
@@ -130,11 +133,14 @@ documented contexts. Source spelling and output size can change substantially
 even when the evaluated value is unchanged.
 
 CDATA has the same fragment-composition guarantee for `]]>` and preserves the
-XML parser's text value, subject to the existing invalid-character replacement
-and line-ending normalization policies. Its output can expand to thirteen
-characters for each input `]` or `>` and may be reported as multiple CDATA/text
-events. XML-comment encoding is deliberately lossy: every input hyphen becomes
-`~`. Trusted text on either side must itself be legal in the selected context;
+XML parser's text value for accepted input, subject only to XML line-ending
+normalization. Input that cannot be represented (a literal `]]>`, an illegal
+XML 1.0 character, an unpaired surrogate, or a noncharacter) is rejected with
+`EncodingException` before any output is written rather than replaced. Its
+output can expand to thirteen characters for each input `]` or `>` and may be
+reported as multiple CDATA/text events. XML-comment encoding is deliberately
+lossy: every input hyphen becomes `~`. Trusted text on either side must itself
+be legal in the selected context;
 the guarantee prevents the encoded fragment from completing a parser token.
 
 ## JSON string content — new in 1.5

@@ -56,12 +56,28 @@ public class EncodersTest extends TestCase {
             assertSame(context.name + " singleton", actual, Encoders.forName(context.name));
             // Compare against an independently constructed encoder so a facade and
             // registry wired to the same wrong singleton cannot agree accidentally.
-            assertEquals(context.name, Encode.encode(context.encoder, EncoderContexts.probe()),
-                Encode.encode(actual, EncoderContexts.probe()));
+            if (Encoders.CDATA.equals(context.name)) {
+                // The shared probe contains characters CDATA must reject; both
+                // the registry and a fresh instance must fail closed the same way.
+                assertRejects(context.encoder);
+                assertRejects(actual);
+            } else {
+                assertEquals(context.name, Encode.encode(context.encoder, EncoderContexts.probe()),
+                    Encode.encode(actual, EncoderContexts.probe()));
+            }
             if (actual instanceof XMLEncoder || actual instanceof JavaScriptEncoder
                     || actual instanceof CSSEncoder || actual instanceof URIEncoder) {
                 assertEquals(context.name + " mode/version", context.encoder.toString(), actual.toString());
             }
+        }
+    }
+
+    private static void assertRejects(Encoder encoder) {
+        try {
+            Encode.encode(encoder, EncoderContexts.probe());
+            fail("fail-closed encoder accepted the probe");
+        } catch (EncodingException expected) {
+            // Required.
         }
     }
 

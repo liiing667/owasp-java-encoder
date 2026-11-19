@@ -1021,17 +1021,23 @@ public final class Encode {
     }
 
     /**
-     * Encodes data for an XML CDATA section. Every {@code "]"} and
-     * {@code ">"} is represented with close/reopen sequences. This preserves
-     * parsed character data and prevents any nonempty encoded substring from
-     * completing a {@code "]]>"} terminator supplied partly by adjacent
-     * trusted literal text.
-     * Each input {@code "]"} or {@code ">"} expands to thirteen output
-     * characters; prefer the Writer overload for large values.
-     * Invalid XML 1.0 characters and the additional controls and noncharacters
-     * described by {@link #forHtml(String)} are replaced by a space.
-     * XML parsers normalize line endings. The caller must provide the CDATA
-     * section boundaries.
+     * Encodes data for an XML CDATA section with fail-closed semantics. Every
+     * {@code "]"} and {@code ">"} is represented with close/reopen sequences,
+     * which preserves parsed character data and prevents any nonempty encoded
+     * substring from completing a {@code "]]>"} terminator supplied partly by
+     * adjacent trusted literal text. Each input {@code "]"} or {@code ">"}
+     * expands to thirteen output characters; prefer the Writer overload for
+     * large values.
+     *
+     * <p>Instead of silently replacing text, this method rejects input that the
+     * CDATA context cannot represent by throwing {@link EncodingException}: a
+     * literal {@code "]]>"} sequence, an illegal XML 1.0 character (including
+     * NUL and the disallowed C1 controls), an unpaired UTF-16 surrogate, or a
+     * Unicode noncharacter. Rejection happens before any output is produced, so
+     * a failed call never writes a partial or alternate document. Accepted
+     * input stays parseable and round-trips to the same parsed character data,
+     * subject to XML line-ending normalization. The caller must provide the
+     * CDATA section boundaries.</p>
      *
      * <pre>
      *     &lt;xml-data&gt;&lt;![CDATA[&lt;%=Encode.forCDATA(...)%&gt;]]&gt;&lt;/xml-data&gt;
@@ -1039,6 +1045,8 @@ public final class Encode {
      *
      * @param input the input to encode
      * @return the encoded result
+     * @throws EncodingException if {@code input} contains a literal
+     *     {@code "]]>"} or a character that is not legal XML 1.0 CDATA data
      */
     public static String forCDATA(String input) {
         return encode(Encoders.CDATA_ENCODER, input);
@@ -1052,6 +1060,8 @@ public final class Encode {
      * @param input the input string to encode
      * @throws NullPointerException if out is null
      * @throws IOException if thrown by writer
+     * @throws EncodingException if {@code input} contains a literal
+     *     {@code "]]>"} or a character that is not legal XML 1.0 CDATA data
      */
     public static void forCDATA(Writer out, String input)
         throws IOException
@@ -1659,6 +1669,10 @@ public final class Encode {
             str = "null";
         }
 
+        // Fail closed before producing any output. Rejecting encoders (such
+        // as CDATA) throw for input the target context cannot represent.
+        encoder.validateInput(str);
+
         // quick pass--see if we need to actually encode anything, if not
         // return the value unchanged.
         final int n = str.length();
@@ -1694,6 +1708,9 @@ public final class Encode {
             // consistent with String.valueOf(...) use "null" for null.
             str = "null";
         }
+
+        // Fail closed before writing anything to the output.
+        encoder.validateInput(str);
 
         // quick pass--see if we need to actually encode anything, if not
         // return the value unchanged.

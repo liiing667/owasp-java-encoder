@@ -228,9 +228,15 @@ public class ContextBoundaryCompositionTest extends TestCase {
         assertEquals(Encode.forJavaScriptBlock(javascript),
             lowLevelEncode(Encoders.JAVASCRIPT_BLOCK_ENCODER, javascript, 4));
 
-        String cdata = "]]>]><safe";
+        String cdata = "]>]><safe";
         assertEquals(Encode.forCDATA(cdata),
             lowLevelEncode(Encoders.CDATA_ENCODER, cdata, 13));
+        try {
+            lowLevelEncode(Encoders.CDATA_ENCODER, "]]>", 13);
+            fail("CDATA low-level encoder must reject a literal terminator");
+        } catch (EncodingException expected) {
+            // Fail closed.
+        }
 
         String comment = "a--->b";
         assertEquals(Encode.forXmlComment(comment),
@@ -250,7 +256,7 @@ public class ContextBoundaryCompositionTest extends TestCase {
             Encode.forJavaScript("</ScRiPt ><!-- -->"));
         assertEncodedWriterSplits(Encoders.JAVASCRIPT_BLOCK, "</ScRiPt ><!-- -->",
             Encode.forJavaScriptBlock("</ScRiPt ><!-- -->"));
-        assertEncodedWriterSplits(Encoders.CDATA, "]]>]><safe", Encode.forCDATA("]]>]><safe"));
+        assertEncodedWriterSplits(Encoders.CDATA, "]>]><safe", Encode.forCDATA("]>]><safe"));
         assertEncodedWriterSplits(Encoders.XML_COMMENT, "a--->b",
             Encode.forXmlComment("a--->b"));
     }
@@ -277,8 +283,19 @@ public class ContextBoundaryCompositionTest extends TestCase {
         String markup = "<evil id='middle-pwn'/>";
         for (int start = 0; start < token.length(); start++) {
             for (int end = start + 1; end <= token.length(); end++) {
+                String fragment = token.substring(start, end);
+                if (fragment.equals(token)) {
+                    // The complete terminator is unencodable and rejected.
+                    try {
+                        Encode.forCDATA(fragment);
+                        fail("full terminator must be rejected");
+                    } catch (EncodingException expected) {
+                        // Fail closed.
+                    }
+                    continue;
+                }
                 String composed = token.substring(0, start)
-                    + Encode.forCDATA(token.substring(start, end))
+                    + Encode.forCDATA(fragment)
                     + token.substring(end) + markup;
                 org.w3c.dom.Document splitParsed = parseXml(
                     "<?xml version='1.0'?><r><![CDATA[" + composed + "]]></r>");

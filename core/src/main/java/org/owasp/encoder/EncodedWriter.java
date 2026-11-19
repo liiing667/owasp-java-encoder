@@ -107,6 +107,14 @@ public class EncodedWriter extends Writer {
     private boolean _closed;
 
     /**
+     * Number of consecutive {@code ']'} characters at the end of the input
+      * accepted so far, capped at 2. Only the CDATA encoder needs this state
+      * to detect a {@code "]]>"} terminator split across writes; it stays 0
+      * for every other context.
+      */
+    private int _trailingBrackets;
+
+    /**
      * Creates an EncodedWriter that uses the specified encoder to encode all input before sending it to the wrapped writer.
      *
      * @param out the target for all writes
@@ -152,12 +160,14 @@ public class EncodedWriter extends Writer {
             if (cbuf == null) {
                 throw new NullPointerException("cbuf must not be null");
             }
-            if (off < 0 || len < 0 || off > cbuf.length - len) {
-                throw new IndexOutOfBoundsException();
-            }
+        if (off < 0 || len < 0 || off > cbuf.length - len) {
+            throw new IndexOutOfBoundsException();
+        }
 
-            CharBuffer input = CharBuffer.wrap(cbuf);
-            input.limit(off + len).position(off);
+        checkCdataTerminator(cbuf, off, len);
+
+        CharBuffer input = CharBuffer.wrap(cbuf);
+        input.limit(off + len).position(off);
 
             flushLeftOver(input);
 
@@ -189,6 +199,40 @@ public class EncodedWriter extends Writer {
     private void flushBufferToWriter() throws IOException {
         _out.write(_buffer.array(), 0, _buffer.position());
         _buffer.clear();
+    }
+
+    /**
+     * Fails closed when input streamed through this writer completes a CDATA
+     * terminator, including a {@code "]]>"} split across two or three writes.
+     * Only active for the CDATA encoder; other encoders leave the tracker at
+     * zero. Invalid characters and malformed surrogates are rejected by the
+     * encoder itself as each chunk is processed.
+     *
+     * @param cbuf the buffer holding the new input
+     * @param off offset of the first new character
+     * @param len number of new characters
+     * @throws EncodingException if the new input completes {@code "]]>"}
+     */
+    private void checkCdataTerminator(char[] cbuf, int off, int len) {
+        if (!(_encoder instanceof CDATAEncoder)) {
+            return;
+        }
+        final int end = off + len;
+        for (int i = off; i < end; ++i) {
+            char ch = cbuf[i];
+            if (ch == ']') {
+                if (_trailingBrackets < 2) {
+                    ++_trailingBrackets;
+                }
+            } else {
+                if (ch == '>' && _trailingBrackets == 2) {
+                    throw new EncodingException("CDATA encoding rejected input: "
+                        + "literal \"]]>\" terminator completed at write offset "
+                        + (i - off));
+                }
+                _trailingBrackets = 0;
+            }
+        }
     }
 
     /**

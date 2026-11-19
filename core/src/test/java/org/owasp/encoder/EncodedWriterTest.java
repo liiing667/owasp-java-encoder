@@ -64,15 +64,47 @@ public class EncodedWriterTest {
     private static final String TAIL = "<b>";
 
     @Test(timeout = 5000)
-    public void cdataTerminatorSplitAcrossFullBufferStaysEncoded() throws IOException {
+    public void cdataTerminatorSplitAcrossFullBufferFailsClosed() throws Exception {
         StringWriter out = new StringWriter();
         EncodedWriter writer = new EncodedWriter(out, Encoders.CDATA);
         writer.write(repeat('a', 1008));
         writer.write("]]");
-        writer.write("]]>>");
-        writer.write("<script>");
-        writer.close();
-        assertEquals(Encode.forCDATA(repeat('a', 1008) + "]]]]>><script>"), out.toString());
+        try {
+            writer.write("]]>>");
+            fail("a terminator completed across writes must be rejected");
+        } catch (EncodingException expected) {
+            // Fail closed: no second document can be produced.
+        }
+        // The accepted prefix is exactly the encoding of the safe input; the
+        // rejected write must not have appended any additional characters.
+        assertEquals(Encode.forCDATA(repeat('a', 1008) + "]]"),
+            fullCdataOutput(writer, out));
+
+        // A terminator completed across three single-character writes too.
+        StringWriter out2 = new StringWriter();
+        EncodedWriter writer2 = new EncodedWriter(out2, Encoders.CDATA);
+        writer2.write("x]]");
+        writer2.write("");
+        try {
+            writer2.write(">");
+            fail("three-write terminator must be rejected");
+        } catch (EncodingException expected) {
+            // Fail closed.
+        }
+        assertEquals(Encode.forCDATA("x]]"), fullCdataOutput(writer2, out2));
+    }
+
+    /**
+     * Reconstructs everything a CDATA writer had produced up to a rejection,
+     * including bytes still held in its internal output buffer, by reading the
+     * buffer reflectively. A rejected terminator never reaches this output.
+     */
+    private static String fullCdataOutput(EncodedWriter writer, StringWriter out)
+            throws Exception {
+        java.lang.reflect.Field field = EncodedWriter.class.getDeclaredField("_buffer");
+        field.setAccessible(true);
+        CharBuffer buffer = (CharBuffer) field.get(writer);
+        return out.toString() + new String(buffer.array(), 0, buffer.position());
     }
 
     @Test(timeout = 5000)
@@ -319,19 +351,45 @@ public class EncodedWriterTest {
 
     private static void assertSameAsSingleCall(String name, Encoder encoder, String filler, List<String> writes)
             throws IOException {
+        // Build the complete logical input independently of the streaming
+        // writes, so a mid-stream rejection cannot leave the reference text
+        // missing the chunk that triggered the failure.
         StringBuilder text = new StringBuilder(filler);
-        StringWriter out = new StringWriter();
-        EncodedWriter writer = new EncodedWriter(out, encoder);
-        writer.write(filler);
         for (String write : writes) {
-            writer.write(write);
             text.append(write);
         }
-        writer.write(TAIL);
         text.append(TAIL);
-        writer.close();
 
-        String expected = encodeInOneCall(encoder, text);
+        StringWriter out = new StringWriter();
+        EncodedWriter writer = new EncodedWriter(out, encoder);
+        boolean streamRejected = false;
+        try {
+            writer.write(filler);
+            for (String write : writes) {
+                writer.write(write);
+            }
+            writer.write(TAIL);
+            writer.close();
+        } catch (EncodingException rejected) {
+            streamRejected = true;
+        }
+
+        boolean singleCallRejected = false;
+        String expected = null;
+        try {
+            expected = tryEncodeInOneCall(encoder, text);
+        } catch (EncodingException rejected) {
+            singleCallRejected = true;
+        }
+        if (streamRejected || singleCallRejected) {
+            if (!(streamRejected && singleCallRejected)) {
+                fail(name + " rejection mismatch for split writes "
+                    + MaxEncodedLengthTest.escape(writes.toString())
+                    + ": stream=" + streamRejected
+                    + " singleCall=" + singleCallRejected);
+            }
+            return;
+        }
         if (!expected.equals(out.toString())) {
             fail(name + " with " + filler.length() + " filler characters, then writes "
                 + MaxEncodedLengthTest.escape(writes.toString()) + ": expected ..."
@@ -366,6 +424,18 @@ public class EncodedWriterTest {
         CharBuffer in = CharBuffer.wrap(text.toString().toCharArray());
         CharBuffer out = CharBuffer.allocate(text.length() * 32);
         assertTrue(encoder.encode(in, out, true).isUnderflow());
+        return new String(out.array(), 0, out.position());
+    }
+
+    /**
+     * Encodes the whole text in one low-level call without asserting the
+     * result, so a fail-closed encoder surfaces its EncodingException to the
+     * caller instead of an assertion error.
+     */
+    private static String tryEncodeInOneCall(Encoder encoder, CharSequence text) {
+        CharBuffer in = CharBuffer.wrap(text.toString().toCharArray());
+        CharBuffer out = CharBuffer.allocate(text.length() * 32);
+        encoder.encode(in, out, true);
         return new String(out.array(), 0, out.position());
     }
 

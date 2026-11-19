@@ -99,12 +99,44 @@ public class EncodeFacadeTest extends TestCase {
 
     private void assertFacade(EncoderContexts context, String input) throws Exception {
         Encoder encoder = Encoders.forName(context.name);
-        String expected = input == null ? "null" : Encode.encode(encoder, input);
         Method stringMethod = Encode.class.getMethod(context.method, String.class);
         Method writerMethod = Encode.class.getMethod(context.method, Writer.class, String.class);
+        if (input != null && Encoders.CDATA.equals(context.name)) {
+            try {
+                Encode.encode(encoder, input);
+            } catch (EncodingException rejected) {
+                assertCdataFacadeRejects(stringMethod, writerMethod, input);
+                return;
+            }
+            // Legal CDATA input follows the normal delegation contract.
+        }
+        String expected = input == null ? "null" : Encode.encode(encoder, input);
         assertEquals(context.method + " String", expected, stringMethod.invoke(null, (Object) input));
         StringWriter out = new StringWriter();
         writerMethod.invoke(null, out, input);
         assertEquals(context.method + " Writer", expected, out.toString());
+    }
+
+    /**
+     * The fail-closed CDATA facade must reject the shared probe (which
+     * contains NUL, C1 controls, surrogates, noncharacters and a literal
+     * terminator) through both overloads, and never write partial output.
+     */
+    private void assertCdataFacadeRejects(Method stringMethod, Method writerMethod,
+            String input) throws Exception {
+        try {
+            stringMethod.invoke(null, input);
+            fail("CDATA String facade accepted an unencodable probe");
+        } catch (java.lang.reflect.InvocationTargetException expected) {
+            assertTrue(expected.getCause() instanceof EncodingException);
+        }
+        StringWriter out = new StringWriter();
+        try {
+            writerMethod.invoke(null, out, input);
+            fail("CDATA Writer facade accepted an unencodable probe");
+        } catch (java.lang.reflect.InvocationTargetException expected) {
+            assertTrue(expected.getCause() instanceof EncodingException);
+        }
+        assertEquals("rejection must not write output", "", out.toString());
     }
 }

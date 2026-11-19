@@ -94,6 +94,11 @@ public class TagEncodingTest extends EncodingTagTest {
 
     @Override
     protected void runTest() throws Exception {
+        if ("forCDATA".equals(facade.getName()) && input != null
+                && isUnencodableCdata(input)) {
+            assertCdataRejects();
+            return;
+        }
         String expected = input == null ? "null" : (String) facade.invoke(null, input);
         EncodingTag tag = tagClass.getConstructor().newInstance();
         tag.setJspContext(_pageContext);
@@ -105,6 +110,55 @@ public class TagEncodingTest extends EncodingTagTest {
             assertScriptContained("TLD function target", expected);
             assertScriptContained("tag", actual);
         }
+    }
+
+    /**
+     * The shared hostile fixtures contain a literal {@code "]]>"} terminator,
+     * a NUL, C1 controls and malformed surrogates that the fail-closed CDATA
+     * encoder must refuse rather than replace.
+     */
+    private boolean isUnencodableCdata(String value) {
+        if (value.contains("]]>")) {
+            return true;
+        }
+        for (int i = 0; i < value.length(); ++i) {
+            char ch = value.charAt(i);
+            if (ch < ' ' && ch != '\t' && ch != '\r' && ch != '\n') {
+                return true;
+            }
+            if (ch >= 0x7f && ch <= 0x9f && ch != 0x85) {
+                return true;
+            }
+            if (ch >= Character.MIN_SURROGATE && ch <= Character.MAX_SURROGATE) {
+                return true;
+            }
+            if (ch == 0xfffe || ch == 0xffff || (ch >= 0xfdd0 && ch <= 0xfdef)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void assertCdataRejects() throws Exception {
+        try {
+            facade.invoke(null, input);
+            fail(getName() + ": CDATA facade should reject the input");
+        } catch (java.lang.reflect.InvocationTargetException expected) {
+            assertTrue(expected.getCause() instanceof
+                org.owasp.encoder.EncodingException);
+        }
+
+        EncodingTag tag = tagClass.getConstructor().newInstance();
+        tag.setJspContext(_pageContext);
+        tag.setValue(input);
+        try {
+            tag.doTag();
+            fail(getName() + ": CDATA tag should reject the input");
+        } catch (org.owasp.encoder.EncodingException expected) {
+            // Fail closed.
+        }
+        assertEquals(getName() + ": no output on rejection", "",
+            _response.getContentAsString());
     }
 
     private void assertScriptContained(String path, String encoded) {

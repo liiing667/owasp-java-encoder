@@ -33,6 +33,36 @@ public final class JspEngineTest {
     private record Descriptor(String uri, List<Binding> bindings) { }
     private record Scenario(String name, String expression, String input, String coerced) { }
     private record Page(String name, byte[] expected, String rejection) { }
+
+    /**
+     * Bindings whose context rejects the shared hostile fixture instead of
+     * replacing it. CDATA fails closed on its terminator, NUL, C1 controls,
+     * malformed surrogates, and noncharacters.
+     */
+    private static boolean isFailClosed(String bindingName, String input) {
+        if (!"forCDATA".equals(bindingName) || input == null) {
+            return false;
+        }
+        if (input.contains("]]>")) {
+            return true;
+        }
+        for (int i = 0; i < input.length(); ++i) {
+            char ch = input.charAt(i);
+            if (ch < ' ' && ch != '\t' && ch != '\r' && ch != '\n') {
+                return true;
+            }
+            if (ch >= 0x7f && ch <= 0x9f && ch != 0x85) {
+                return true;
+            }
+            if (ch >= Character.MIN_SURROGATE && ch <= Character.MAX_SURROGATE) {
+                return true;
+            }
+            if (ch == 0xfffe || ch == 0xffff || (ch >= 0xfdd0 && ch <= 0xfdef)) {
+                return true;
+            }
+        }
+        return false;
+    }
     private static final String DIRECTIVE = "<%@page contentType=\"text/plain; charset=UTF-8\" "
         + "pageEncoding=\"UTF-8\" trimDirectiveWhitespaces=\"true\"%>";
     private static final List<Scenario> CASES = List.of(
@@ -77,6 +107,17 @@ public final class JspEngineTest {
                         StringBuilder expected = new StringBuilder();
                         for (Binding binding : descriptor.bindings()) {
                             boolean tag = binding.kind().equals("tag");
+                            String inputForBinding = scenario.coerced() != null
+                                ? scenario.coerced() : scenario.input();
+                            // JSP String attributes preserve scriptlet null; EL coerces null/missing to "".
+                            if (!tag && scenario.name().equals("null-scriptlet")) inputForBinding = "";
+                            if (isFailClosed(binding.name(), inputForBinding)) {
+                                // Fail-closed contexts cannot appear on a page that must render
+                                // exact bytes; a dedicated error page below asserts the rejection.
+                                exercised.add(file + ":" + binding);
+                                renderAssertions++;
+                                continue;
+                            }
                             String marker = "[" + binding.kind() + ":" + binding.name() + "]";
                             jsp.append(marker);
                             expected.append(marker);
@@ -88,9 +129,7 @@ public final class JspEngineTest {
                                     : scenario.expression().substring(2, scenario.expression().length() - 1);
                                 jsp.append("${e:").append(binding.name()).append('(').append(expression).append(")}");
                             }
-                            String input = scenario.coerced() != null ? scenario.coerced() : scenario.input();
-                            // JSP String attributes preserve scriptlet null; EL coerces null/missing to "".
-                            if (!tag && scenario.name().equals("null-scriptlet")) input = "";
+                            String input = inputForBinding;
                             if (tag) {
                                 StringWriter writer = new StringWriter();
                                 encode.getMethod(binding.name(), Writer.class, String.class).invoke(null, writer, input);
@@ -104,6 +143,31 @@ public final class JspEngineTest {
                         String name = file + "-" + scenario.name() + ".jsp";
                         Files.writeString(web.resolve(name), jsp, StandardCharsets.UTF_8);
                         pages.add(new Page(name, expected.toString().getBytes(StandardCharsets.UTF_8), null));
+                    }
+                    // Fail-closed CDATA bindings must reject unencodable data at
+                    // request time through both the tag and the EL function.
+                    String hostile = CASES.get(0).input();
+                    String hostileB64 = Base64.getEncoder()
+                        .encodeToString(hostile.getBytes(StandardCharsets.UTF_8));
+                    for (Binding binding : descriptor.bindings()) {
+                        if (!"forCDATA".equals(binding.name())) {
+                            continue;
+                        }
+                        String setup = "<%request.setAttribute(\"fixtureValue\", new String(java.util.Base64"
+                            + ".getDecoder().decode(\"" + hostileB64
+                            + "\"), java.nio.charset.StandardCharsets.UTF_8));%>";
+                        String tagPage = prefix + setup + "<e:forCDATA value=\"${fixtureValue}\"/>";
+                        Files.writeString(web.resolve(file + "-forCDATA-tag-reject.jsp"),
+                            tagPage, StandardCharsets.UTF_8);
+                        pages.add(new Page(file + "-forCDATA-tag-reject.jsp",
+                            tagPage.getBytes(StandardCharsets.UTF_8),
+                            "EncodingException"));
+                        String fnPage = prefix + setup + "${e:forCDATA(fixtureValue)}";
+                        Files.writeString(web.resolve(file + "-forCDATA-fn-reject.jsp"),
+                            fnPage, StandardCharsets.UTF_8);
+                        pages.add(new Page(file + "-forCDATA-fn-reject.jsp",
+                            fnPage.getBytes(StandardCharsets.UTF_8),
+                            "EncodingException"));
                     }
                     for (Binding binding : descriptor.bindings()) {
                         if (!binding.kind().equals("tag")) continue;
@@ -139,8 +203,12 @@ public final class JspEngineTest {
                         }
                     } else {
                         String message = new String(response.body(), StandardCharsets.UTF_8);
-                        if (response.statusCode() != 500 || !message.contains("JasperException")
-                                || !message.toLowerCase(java.util.Locale.ROOT).contains(page.rejection())) {
+                        boolean jasperFailure = message.contains("JasperException")
+                            || message.contains("EncodingException");
+                        String lowerMessage = message.toLowerCase(java.util.Locale.ROOT);
+                        if (response.statusCode() != 500 || !jasperFailure
+                                || !lowerMessage.contains(
+                                    page.rejection().toLowerCase(java.util.Locale.ROOT))) {
                             throw new AssertionError("Expected JSP translation rejection: " + page.name() + "\n" + message);
                         }
                     }
