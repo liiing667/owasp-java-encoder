@@ -3,6 +3,7 @@ package fixture;
 
 import java.io.StringWriter;
 import java.io.Writer;
+import java.lang.reflect.InvocationTargetException;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -60,6 +61,7 @@ public final class JspEngineTest {
             Set<String> discovered = new LinkedHashSet<>();
             Set<String> exercised = new LinkedHashSet<>();
             int renderAssertions = 0;
+            int renderRejections = 0;
             try (JarFile jar = new JarFile(adapter.toFile())) {
                 for (String file : List.of("java-encoder.tld", "java-encoder-advanced.tld")) {
                     Descriptor descriptor = descriptor(jar, "META-INF/" + file);
@@ -75,6 +77,7 @@ public final class JspEngineTest {
                                 .append(b64).append("\"), java.nio.charset.StandardCharsets.UTF_8));%>");
                         }
                         StringBuilder expected = new StringBuilder();
+                        String rejection = null;
                         for (Binding binding : descriptor.bindings()) {
                             boolean tag = binding.kind().equals("tag");
                             String marker = "[" + binding.kind() + ":" + binding.name() + "]";
@@ -91,19 +94,31 @@ public final class JspEngineTest {
                             String input = scenario.coerced() != null ? scenario.coerced() : scenario.input();
                             // JSP String attributes preserve scriptlet null; EL coerces null/missing to "".
                             if (!tag && scenario.name().equals("null-scriptlet")) input = "";
-                            if (tag) {
-                                StringWriter writer = new StringWriter();
-                                encode.getMethod(binding.name(), Writer.class, String.class).invoke(null, writer, input);
-                                expected.append(writer);
-                            } else {
-                                expected.append(encode.getMethod(binding.name(), String.class).invoke(null, input));
-                            }
                             exercised.add(file + ":" + binding);
+                            try {
+                                if (tag) {
+                                    StringWriter writer = new StringWriter();
+                                    encode.getMethod(binding.name(), Writer.class, String.class).invoke(null, writer, input);
+                                    expected.append(writer);
+                                } else {
+                                    expected.append(encode.getMethod(binding.name(), String.class).invoke(null, input));
+                                }
+                            } catch (InvocationTargetException failure) {
+                                if (!(failure.getCause() instanceof IllegalArgumentException)) throw failure;
+                                // Fail-closed binding: the page fails at render
+                                // time and the error report must identify the
+                                // rejection. Later bindings never render.
+                                rejection = "json text contains";
+                                break;
+                            }
                             renderAssertions++;
                         }
                         String name = file + "-" + scenario.name() + ".jsp";
                         Files.writeString(web.resolve(name), jsp, StandardCharsets.UTF_8);
-                        pages.add(new Page(name, expected.toString().getBytes(StandardCharsets.UTF_8), null));
+                        if (rejection != null) renderRejections++;
+                        pages.add(new Page(name,
+                            rejection == null ? expected.toString().getBytes(StandardCharsets.UTF_8) : null,
+                            rejection));
                     }
                     for (Binding binding : descriptor.bindings()) {
                         if (!binding.kind().equals("tag")) continue;
@@ -146,8 +161,9 @@ public final class JspEngineTest {
                     }
                 }
                 System.out.println("PASS " + adapter.getFileName() + ": " + discovered.size() + " TLD bindings; "
-                    + renderAssertions + " exact-byte assertions; " + (pages.size() - CASES.size() * 2)
-                    + " translation rejections; " + org.apache.catalina.util.ServerInfo.getServerInfo());
+                    + renderAssertions + " exact-byte assertions; " + (pages.size() - CASES.size() * 2 - renderRejections)
+                    + " translation rejections; " + renderRejections + " render rejections; "
+                    + org.apache.catalina.util.ServerInfo.getServerInfo());
             } finally {
                 try { tomcat.stop(); } finally { tomcat.destroy(); }
             }

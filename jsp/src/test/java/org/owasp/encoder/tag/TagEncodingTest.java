@@ -35,6 +35,7 @@
 package org.owasp.encoder.tag;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.Map;
 import junit.framework.Test;
@@ -94,7 +95,26 @@ public class TagEncodingTest extends EncodingTagTest {
 
     @Override
     protected void runTest() throws Exception {
-        String expected = input == null ? "null" : (String) facade.invoke(null, input);
+        final String expected;
+        try {
+            expected = input == null ? "null" : (String) facade.invoke(null, input);
+        } catch (InvocationTargetException rejected) {
+            if (!(rejected.getCause() instanceof IllegalArgumentException)) {
+                throw rejected;
+            }
+            // A fail-closed facade rejects the input; the tag must reject
+            // it too instead of writing encoded output.
+            EncodingTag tag = tagClass.getConstructor().newInstance();
+            tag.setJspContext(_pageContext);
+            tag.setValue(input);
+            try {
+                tag.doTag();
+                fail(getName() + ": fail-closed tag must reject the input");
+            } catch (IllegalArgumentException expectedRejection) {
+                // Same fail-closed policy as the facade.
+            }
+            return;
+        }
         EncodingTag tag = tagClass.getConstructor().newInstance();
         tag.setJspContext(_pageContext);
         tag.setValue(input);

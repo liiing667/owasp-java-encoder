@@ -1636,6 +1636,86 @@ public final class Encode {
         encode(Encoders.JSON_ENCODER, out, input);
     }
 
+    /**
+     * <p>Encodes JSON text for embedding as a string value in another JSON
+     * document (nested JSON).  Use this when a page or template takes JSON
+     * text it did not serialize itself &mdash; for example the output of a
+     * JSON serializer or of {@link #forJson(String)} &mdash; and embeds that
+     * text again as a JSON string.  The caller must provide the surrounding
+     * double quotation marks of the outer string.</p>
+     *
+     * <p>This method is fail-closed: the complete input is validated as
+     * JSON text before any output is produced.  JSON text containing a raw
+     * control character U+0000 to U+001F (illegal in JSON text under
+     * RFC 8259) or an unpaired surrogate (which has no UTF-8
+     * representation and therefore cannot round-trip) is rejected with an
+     * {@link IllegalArgumentException}.  Legal JSON text is accepted and
+     * preserved: encoding, the embedding context and reversibility form a
+     * single identity, so parsing the resulting JSON string back from
+     * UTF-8 returns text equal to the input.</p>
+     *
+     * <p>Accepted text is encoded exactly like {@link #forJson(String)}:
+     * backslashes and quotes become <code>\\</code> and <code>\"</code>,
+     * and <code>&lt;</code>, <code>&gt;</code>, <code>&amp;</code>,
+     * U+2028 and U+2029 become <code>&#92;uxxxx</code> escapes, so the
+     * encoded string cannot end an HTML <code>&lt;script&gt;</code>
+     * element or a pre-ES2019 JavaScript line.  Without this encoding,
+     * backslashes, quotes and Unicode line separators in the nested text
+     * decode differently at each of the two JSON levels.  Because the
+     * escapes are JSON's own, the double decoding of the nested document
+     * reproduces the original text exactly.</p>
+     *
+     * <p>This method checks character legality only; it is not a JSON
+     * parser and does not verify the grammar of the document.  Produce
+     * JSON text with a JSON serializer.  To encode an arbitrary string
+     * value that is not JSON text, use {@link #forJson(String)}, which
+     * escapes control characters instead of rejecting them.</p>
+     *
+     * <p>A {@code null} input is encoded as the text <code>null</code>,
+     * like the other methods of this class.  Because the caller provides
+     * the quotation marks, the resulting JSON value is the string
+     * <code>"null"</code>, not the JSON literal <code>null</code>.</p>
+     *
+     * <b>Example JSP Usage:</b>
+     * <pre>
+     *    &lt;script type="application/json" id="outer"&gt;
+     *    {"payload":"&lt;%=Encode.forJsonText(innerJson)%&gt;"}
+     *    &lt;/script&gt;
+     * </pre>
+     *
+     * @param json the JSON text to embed as a nested JSON string
+     * @return the JSON text encoded for the nested string context
+     * @throws IllegalArgumentException if the JSON text contains a raw
+     * control character U+0000 to U+001F or an unpaired surrogate
+     * @see #forJson(String)
+     * @since 1.6.1
+     */
+    public static String forJsonText(String json) {
+        JSONEncoder.validateText(json);
+        return encode(Encoders.JSON_TEXT_ENCODER, json);
+    }
+
+    /**
+     * See {@link #forJsonText(String)} for description of encoding.  This
+     * version writes directly to a Writer without an intervening string.
+     * The complete input is validated before anything is written.
+     *
+     * @param out where to write encoded output
+     * @param json the JSON text to embed as a nested JSON string
+     * @throws NullPointerException if out is null
+     * @throws IllegalArgumentException if the JSON text contains a raw
+     * control character U+0000 to U+001F or an unpaired surrogate; thrown
+     * before anything is written to {@code out}
+     * @throws IOException if thrown by writer
+     * @since 1.6.1
+     */
+    public static void forJsonText(Writer out, String json)
+        throws IOException
+    {
+        JSONEncoder.validateText(json);
+        encode(Encoders.JSON_TEXT_ENCODER, out, json);
+    }
+
     // Additional?
     // MySQL
     // PostreSQL

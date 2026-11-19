@@ -137,7 +137,7 @@ On **1.5**, both basic taglibs contain these tags and same-named EL functions:
 `forHtmlUnquotedAttribute`, `forJavaScript`, `forJson`, `forCssString`, `forCssUrl`,
 `forUri`, `forUriComponent`, `forXml`, `forXmlContent`, `forXmlAttribute`, `forXml11`.
 Advanced adds `forJavaScriptAttribute`, `forJavaScriptBlock`, `forJavaScriptSource`,
-`forXmlComment`, `forXml11Content` and `forXml11Attribute`. `forJava` is intentionally
+`forJsonText`, `forXmlComment`, `forXml11Content` and `forXml11Attribute`. `forJava` is intentionally
 absent. Through **1.4.1**, neither taglib contains `forJson` or any `forXml11*`
 binding, even though XML 1.1 already exists in the core API. XML 1.1 bindings must
 output an actual XML 1.1 document, not an HTML page.

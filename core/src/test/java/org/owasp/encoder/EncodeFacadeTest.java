@@ -36,6 +36,7 @@ package org.owasp.encoder;
 
 import java.io.StringWriter;
 import java.io.Writer;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -99,12 +100,39 @@ public class EncodeFacadeTest extends TestCase {
 
     private void assertFacade(EncoderContexts context, String input) throws Exception {
         Encoder encoder = Encoders.forName(context.name);
-        String expected = input == null ? "null" : Encode.encode(encoder, input);
         Method stringMethod = Encode.class.getMethod(context.method, String.class);
         Method writerMethod = Encode.class.getMethod(context.method, Writer.class, String.class);
+        if ("json-text".equals(context.name) && rejectedByJsonTextPolicy(input)) {
+            try {
+                stringMethod.invoke(null, (Object) input);
+                fail("fail-closed " + context.method + " must reject the input");
+            } catch (InvocationTargetException expected) {
+                assertTrue(expected.getCause() instanceof IllegalArgumentException);
+            }
+            StringWriter rejectedOut = new StringWriter();
+            try {
+                writerMethod.invoke(null, rejectedOut, input);
+                fail("fail-closed " + context.method + " must reject the input");
+            } catch (InvocationTargetException expected) {
+                assertTrue(expected.getCause() instanceof IllegalArgumentException);
+            }
+            assertEquals(context.method + " Writer emits nothing on rejection",
+                "", rejectedOut.toString());
+            return;
+        }
+        String expected = input == null ? "null" : Encode.encode(encoder, input);
         assertEquals(context.method + " String", expected, stringMethod.invoke(null, (Object) input));
         StringWriter out = new StringWriter();
         writerMethod.invoke(null, out, input);
         assertEquals(context.method + " Writer", expected, out.toString());
+    }
+
+    private static boolean rejectedByJsonTextPolicy(String input) {
+        try {
+            JSONEncoder.validateText(input);
+            return false;
+        } catch (IllegalArgumentException rejected) {
+            return true;
+        }
     }
 }

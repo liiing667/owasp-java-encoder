@@ -52,6 +52,13 @@ import java.nio.charset.CoderResult;
  * <p>A high surrogate at the end of the input is only encoded when
  * {@code endOfInput} is true.  Otherwise it is left in the input buffer
  * until the next character shows whether it is part of a pair.</p>
+ *
+ * <p>The {@link Encode#forJsonText(String)} facade is fail-closed: it runs
+ * {@link #validateText(String)} over the complete input before any output
+ * is produced and rejects JSON text containing raw control characters or
+ * unpaired surrogates with an {@link IllegalArgumentException}.  This
+ * streaming encoder retains the escape-everything behavior for callers
+ * that cannot validate up front.</p>
  */
 class JSONEncoder extends Encoder {
 
@@ -59,6 +66,64 @@ class JSONEncoder extends Encoder {
      * The length of a Unicode escape, e.g. "\\u003c".
      */
     static final int U_ESCAPE_LENGTH = 6;
+
+    /**
+     * Fail-closed validation for the {@code Encode.forJsonText} facade.
+     * The whole input is scanned so that a rejection happens before any
+     * output is produced.  A {@code null} input is accepted because the
+     * facade substitutes the literal {@code "null"}, which is legal JSON
+     * text.
+     *
+     * <p>JSON text exchanged between systems must be Unicode encoded in
+     * UTF-8 (RFC 8259).  Raw control characters U+0000 to U+001F are not
+     * legal anywhere in JSON text, and an unpaired surrogate has no UTF-8
+     * representation, so neither can re-embed and re-parse identically.
+     * Everything else, including {@code "}, {@code \}, U+2028 and U+2029,
+     * is legal JSON text that the encoder escapes for the nested string
+     * context while preserving the decoded value.</p>
+     *
+     * @param json the JSON text to validate
+     * @throws IllegalArgumentException if the JSON text contains a raw
+     * control character U+0000 to U+001F or an unpaired surrogate
+     */
+    static void validateText(String json) {
+        if (json == null) {
+            return;
+        }
+        final int n = json.length();
+        for (int i = 0; i < n; ++i) {
+            char ch = json.charAt(i);
+            if (ch < ' ') {
+                throw new IllegalArgumentException(String.format(
+                    "JSON text contains illegal raw control character "
+                        + "0x%02X at offset %d; control characters must be "
+                        + "escaped in JSON text (RFC 8259)", (int) ch, i));
+            }
+            if (Character.isHighSurrogate(ch)) {
+                if (i + 1 < n && Character.isLowSurrogate(json.charAt(i + 1))) {
+                    ++i;
+                } else {
+                    throw unpairedSurrogate(i, ch);
+                }
+            } else if (Character.isLowSurrogate(ch)) {
+                throw unpairedSurrogate(i, ch);
+            }
+        }
+    }
+
+    /**
+     * Builds the rejection for an unpaired surrogate in JSON text.
+     *
+     * @param offset the offset of the offending code unit in the input
+     * @param ch the unpaired surrogate code unit
+     * @return the exception to throw
+     */
+    private static IllegalArgumentException unpairedSurrogate(int offset, char ch) {
+        return new IllegalArgumentException(String.format(
+            "JSON text contains unpaired surrogate 0x%04X at offset %d; "
+                + "it has no UTF-8 representation and cannot round-trip",
+            (int) ch, offset));
+    }
 
     @Override
     protected int maxEncodedLength(int n) {

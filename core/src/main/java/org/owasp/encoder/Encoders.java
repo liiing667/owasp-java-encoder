@@ -146,6 +146,14 @@ public final class Encoders {
      */
     public static final String JSON = "json";
     /**
+     * Name of the {@linkplain Encode#forJsonText(String) nested JSON text}
+     * context.  Encoders looked up under this name stream without the
+     * facade's fail-closed validation; see
+     * {@link Encode#forJsonText(String)}.
+     * @since 1.6.1
+     */
+    public static final String JSON_TEXT = "json-text";
+    /**
      * Name of {@linkplain Encode#forUri(String) URI} context.
      *
      * @deprecated Encoding a complete URI does not make an untrusted URI
@@ -254,6 +262,11 @@ public final class Encoders {
      */
     static final JSONEncoder JSON_ENCODER
             = map(JSON, new JSONEncoder());
+    /**
+     * Encoder for JSON text nested in a JSON string.
+     */
+    static final JSONEncoder JSON_TEXT_ENCODER
+            = map(JSON_TEXT, new JSONEncoder());
     /**
      * Encoder for CSS strings.
      */

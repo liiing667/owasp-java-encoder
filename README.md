@@ -73,6 +73,7 @@ output boundary; account for any escaping your template engine already performs.
 | One raw URL component | `forUriComponent`; assemble with trusted delimiters, validate the URL, then encode for the enclosing HTML attribute |
 | JavaScript string | `forJavaScript`; supply single/double quotes. Ordinary untagged template literal text requires **1.5**. Never use in tagged templates, expression bodies, JSON or script URLs |
 | JSON string content | `forJson` (**1.5**); supply double quotes. Prefer a serializer for a complete document |
+| Nested JSON text | `forJsonText` (**1.6.1**); fail-closed on illegal control characters, legal JSON text round-trips unchanged |
 | Quoted CSS string / CSS `url(...)` value | `forCssString` / `forCssUrl`; validate URLs and obey the method's surrounding-context rules |
 | XML 1.0 text / quoted attribute | `forXmlContent` / `forXmlAttribute`; `forXml` covers both |
 | XML 1.1 text / quoted attribute | `forXml11Content` / `forXml11Attribute` (core **1.4+**); requires an XML 1.1 document/parser, not HTML |

@@ -161,6 +161,22 @@ JSON consumer interoperates with. JSON strings do not belong in HTML attributes
 without the enclosing attribute encoding, and HTML entity escaping is not JSON
 serialization.
 
+## Nested JSON text — new in 1.6.1
+
+`Encode.forJsonText` covers JSON text embedded again as a string value of an
+outer JSON document, as a page does when it re-embeds serialized output. The
+facade is fail-closed: the complete input is validated before any output is
+produced, and JSON text containing a raw control character U+0000 to U+001F
+(illegal in JSON text under RFC 8259) or an unpaired surrogate (no UTF-8
+representation) is rejected with `IllegalArgumentException`. Legal JSON text is
+preserved: it is encoded exactly like `forJson`, so backslashes, quotes and the
+Unicode line separators U+2028/U+2029 cannot decode differently at the two JSON
+levels, and parsing the nested string back from UTF-8 returns the identical
+text. The encoding, the HTML script embedding context and reversibility are one
+contract. The check is character-level, not a JSON parser; produce JSON text
+with a serializer. The streaming `json-text` context cannot validate up front
+and retains the escape-everything behavior.
+
 ## URLs and non-goals
 
 Use `forUriComponent` on one raw path segment, query name/value or fragment.

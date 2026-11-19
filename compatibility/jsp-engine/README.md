@@ -31,9 +31,13 @@ servlets, AJP, HTTP/2, TLS or application authentication configuration.
 Dependabot reviews the plugin dependencies in the adapter POMs; recheck upstream
 advisories with each update and before a release.
 
-The current surface is 72 bindings per adapter: 576 exact-byte assertions and
-72 rejected pages on each engine (1,152 byte assertions and 144 rejections total).
-Counts are derived from the packaged descriptors rather than frozen in the test.
+The current surface is 74 bindings per adapter: 559 exact-byte assertions and
+74 rejected pages on each engine (1,118 byte assertions and 148 rejections
+total). Counts are derived from the packaged descriptors rather than frozen in
+the test. One rejected page per descriptor is the fail-closed `forJsonText`
+render rejection: the facade throws `IllegalArgumentException` for the hostile
+input's raw control characters, the page fails at render time, and the HTTP 500
+error report must identify the JSON text rejection.
 
 For both basic and advanced descriptors the fixture discovers every tag and
 function and fails on empty, duplicate, missing or unexercised bindings. Each

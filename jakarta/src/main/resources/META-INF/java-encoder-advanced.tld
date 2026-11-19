@@ -304,6 +304,34 @@
     </tag>
     <tag>
         <description>
+			Encodes JSON text for embedding as a string value in another JSON
+			document (nested JSON).  The caller MUST provide the surrounding
+			double quotation marks.  Fail-closed: the complete input is
+			validated before any output is produced, and JSON text containing
+			a raw control character U+0000 to U+001F or an unpaired surrogate
+			is rejected with IllegalArgumentException.  Legal JSON text is
+			encoded exactly like forJson, so backslashes, quotes and the
+			Unicode line separators U+2028 and U+2029 cannot decode
+			differently at the two JSON levels, and the nested string parses
+			back to the identical text.  This is a character-level check, not
+			a JSON parser; produce JSON text with a serializer.  A null value
+			is written as the text null, which becomes the JSON string "null"
+			inside the caller's quotation marks.
+        </description>
+        <display-name>forJsonText</display-name>
+        <name>forJsonText</name>
+        <tag-class>org.owasp.encoder.tag.ForJsonTextTag</tag-class>
+        <body-content>empty</body-content>
+        <attribute>
+            <description>value to be written out</description>
+            <name>value</name>
+            <required>true</required>
+            <rtexprvalue>true</rtexprvalue>
+            <type>java.lang.String</type>
+        </attribute>
+    </tag>
+    <tag>
+        <description>
             Encodes for unquoted HTML attribute values. Prefer quoted attributes with
             forHtmlAttribute. Empty input produces empty output, which cannot represent an unquoted
             attribute value; a following attribute name may be consumed as the value even when
@@ -856,6 +884,28 @@
         <example>
 			&lt;%@page contentType="application/json; charset=UTF-8"%>
 			{"data":"${forJson(unsafeData)}"}
+        </example>
+    </function>
+    <function>
+        <description>
+			Encodes JSON text for embedding as a string value in another JSON
+			document (nested JSON).  The caller MUST provide the surrounding
+			double quotation marks.  Fail-closed: the complete input is
+			validated before any output is produced, and JSON text containing
+			a raw control character U+0000 to U+001F or an unpaired surrogate
+			is rejected with IllegalArgumentException.  Legal JSON text is
+			encoded exactly like forJson and round-trips to itself through
+			the HTML script embedding context and both JSON decodes.  This is
+			a character-level check, not a JSON parser; produce JSON text
+			with a serializer.
+        </description>
+        <display-name>forJsonText</display-name>
+        <name>forJsonText</name>
+        <function-class>org.owasp.encoder.Encode</function-class>
+        <function-signature>java.lang.String forJsonText(java.lang.String)</function-signature>
+        <example>
+			&lt;%@page contentType="application/json; charset=UTF-8"%>
+			{"payload":"${forJsonText(innerJson)}"}
         </example>
     </function>
 </taglib>

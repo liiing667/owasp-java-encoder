@@ -8,6 +8,14 @@ unchanged. [1.6.0 is available from Central](releases/1.6.0-central-publication.
 
 ## Unreleased
 
+- Add `Encode.forJsonText` for JSON text embedded again as a nested JSON
+  string value. The facade is fail-closed: the complete input is validated
+  before any output, and JSON text with a raw control character U+0000 to
+  U+001F or an unpaired surrogate is rejected with
+  `IllegalArgumentException`. Legal JSON text is encoded exactly like
+  `forJson` and round-trips to itself through the HTML script embedding
+  context and both JSON decodes. Adds the `json-text` context name; its
+  streaming encoder retains the escape-everything behavior.
 - Remove retired Maven Site sources and archive September maintenance records.
 - Refresh build/dependency documentation and clarify the 1.6.0 review record.
   Encoding behavior, public APIs, and published artifacts are unchanged.

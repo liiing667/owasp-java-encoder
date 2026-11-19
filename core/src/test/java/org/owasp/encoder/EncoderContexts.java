@@ -70,6 +70,7 @@ final class EncoderContexts {
         new EncoderContexts("javascript-block", "forJavaScriptBlock", new JavaScriptEncoder(JavaScriptEncoder.Mode.BLOCK, false)),
         new EncoderContexts("javascript-source", "forJavaScriptSource", new JavaScriptEncoder(JavaScriptEncoder.Mode.SOURCE, false)),
         new EncoderContexts("json", "forJson", new JSONEncoder()),
+        new EncoderContexts("json-text", "forJsonText", new JSONEncoder()),
         // Deprecated but retained as a supported compatibility entry point.
         new EncoderContexts("uri", "forUri", new URIEncoder(URIEncoder.Mode.FULL_URI)),
         new EncoderContexts("uri-component", "forUriComponent", new URIEncoder(URIEncoder.Mode.COMPONENT))

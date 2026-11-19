@@ -49,6 +49,8 @@
  * UTF-16 surrogates are escaped; valid surrogate pairs remain unescaped</td></tr>
  * <tr><td>JSON string</td><td>{@link org.owasp.encoder.Encode#forJson(String)};
  * caller supplies double quotes; supports JSON documents and HTML script data blocks</td></tr>
+ * <tr><td>Nested JSON text</td><td>{@link org.owasp.encoder.Encode#forJsonText(String)};
+ * fail-closed on illegal control characters; legal JSON text round-trips unchanged</td></tr>
  * <tr><td>CSS string / unquoted url(...)</td><td>{@link org.owasp.encoder.Encode#forCssString(String)} /
  * {@link org.owasp.encoder.Encode#forCssUrl(String)}; validate URLs separately</td></tr>
  * <tr><td>XML 1.0 text / quoted attribute</td><td>{@link org.owasp.encoder.Encode#forXmlContent(String)} /
