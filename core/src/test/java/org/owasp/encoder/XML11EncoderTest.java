@@ -37,11 +37,15 @@ package org.owasp.encoder;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 
+import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXParseException;
+import org.xml.sax.helpers.DefaultHandler;
 
 import junit.framework.Test;
 import junit.framework.TestCase;
@@ -96,7 +100,59 @@ public class XML11EncoderTest extends TestCase {
                 .encode("mixed-nel-ls", "a&#x85;b&#x2028;c", "a\u0085b\u2028c")
                 
                 // Combined test
-                .encode("mixed-control-chars", "&#x01;a\t&#x7f;b\nc", "\u0001a\t\u007Fb\nc");
+                .encode("mixed-control-chars", "&#x01;a\t&#x7f;b\nc", "\u0001a\t\u007Fb\nc")
+
+                // C0 range boundaries: the first and last restricted control
+                // code, the whitespace holes that must stay literal, and the
+                // first printable code.
+                .encode("c0-null-rejected", " ", "\u0000")
+                .encode("c0-lower-edge", "&#x01;", "\u0001")
+                .encode("c0-before-tab", "&#x08;", "\u0008")
+                .encode("c0-after-cr", "&#x0e;", "\u000E")
+                .encode("c0-upper-edge", "&#x1f;", "\u001F")
+                .encode("c0-first-printable", " ", " ")
+
+                // C1 range boundaries and the internal NEL hole.
+                .encode("c1-lower-edge", "&#x7f;", "\u007F")
+                .encode("c1-before-nel", "&#x84;", "\u0084")
+                .encode("c1-after-nel", "&#x86;", "\u0086")
+                .encode("c1-upper-edge", "&#x9f;", "\u009F")
+                .encode("c1-first-text", "\u00a0", "\u00a0")
+
+                // Surrogate boundaries: valid text just outside the block, each
+                // surrogate edge rejected, and a well-formed pair kept verbatim.
+                .encode("before-surrogate-block", "\ud7ff", "\ud7ff")
+                .encode("first-high-surrogate-rejected", " ", "\ud800")
+                .encode("last-high-surrogate-rejected", " ", "\udbff")
+                .encode("first-low-surrogate-rejected", " ", "\udc00")
+                .encode("last-low-surrogate-rejected", " ", "\udfff")
+                .encode("after-surrogate-block", "\ue000", "\ue000")
+
+                // Noncharacter boundaries must be rejected while neighboring
+                // assigned characters remain intact.
+                .encode("nonchar-fdd0-rejected", " ", "\ufdd0")
+                .encode("nonchar-fdef-rejected", " ", "\ufdef")
+                .encode("after-nonchar-block", "\ufdf0", "\ufdf0")
+                .encode("nonchar-fffe-rejected", " ", "\ufffe")
+                .encode("nonchar-ffff-rejected", " ", "\uffff")
+
+                // A supplementary noncharacter pair is rejected as a unit, a
+                // valid supplementary pair is preserved, and a high surrogate
+                // followed by a non-low code unit cannot merge into text.
+                .encode("supplementary-nonchar-pair-rejected", " ", "\udbff\udffe")
+                .encode("supplementary-valid-pair-kept",
+                    new String(Character.toChars(0x1f600)),
+                    new String(Character.toChars(0x1f600)))
+                .encode("high-then-control-not-a-pair", " &#x01;", "\ud800\u0001")
+
+                // Combinations prove a control or surrogate code unit never
+                // changes how the adjacent unit is classified.
+                .encode("control-before-valid-pair",
+                    "&#x01;\ud800\udc00", "\u0001\ud800\udc00")
+                .encode("valid-pair-before-control",
+                    "\ud800\udc00&#x7f;", "\ud800\udc00\u007F")
+                .encode("nul-bounded-surrogates", "  ", "\u0000\ud800")
+                .encode("two-lone-surrogates", "  ", "\udc00\ud800");
 
             // Define the complete partition before generating the range sweeps.
             builder.encoded(0x01, 0x1f)
@@ -322,5 +378,188 @@ public class XML11EncoderTest extends TestCase {
         Encode.forXml11(out, input);
         assertEquals("&#x2028;&#x2028;&#x2028;", out.toString());
         assertTrue(out.toString().length() <= encoder.maxEncodedLength(input.length()));
+    }
+
+    /**
+     * The XML 1.1 decision is version-specific: the same restricted control
+     * code must be emitted as a character reference only for the XML 1.1
+     * encoder. The XML 1.0 encoder keeps its replacement contract instead of
+     * borrowing the 1.1 spelling.
+     */
+    public void testVersionSelectsRestrictedCharacterHandling() {
+        String restricted = "a\u0001\u007F\u0085\u2028b";
+        assertEquals("a&#x01;&#x7f;&#x85;&#x2028;b", Encode.forXml11(restricted));
+        // XML 1.0 replaces the restricted C0/C1 controls with spaces, but
+        // leaves NEL and line separator as ordinary (normalizable) text.
+        assertEquals("a  \u0085\u2028b", Encode.forXml(restricted));
+        // NEL and LS are ordinary text for XML 1.0, but every C0/C1 control
+        // other than tab/LF/CR is replaced rather than referenced.
+        assertEquals("a\u0085b\u2028c", Encode.forXml("a\u0085b\u2028c"));
+        assertEquals("a b", Encode.forXml("a\u0001b"));
+    }
+
+    /**
+     * Fail-closed range contract over every UTF-16 code unit: encoded output
+     * never contains a literal restricted control code, a lone surrogate, or
+     * a surrogate pair that encodes a noncharacter. Tab, LF and CR are the
+     * only control codes allowed to remain literal.
+     */
+    public void testXML11OutputNeverContainsForbiddenLiteralUnits() {
+        XMLEncoder encoder = new XMLEncoder(XMLEncoder.Mode.ALL,
+            XMLEncoder.Version.XML_1_1);
+        for (int unit = 0; unit <= Character.MAX_VALUE; unit++) {
+            String output = Encode.encode(encoder, String.valueOf((char) unit));
+            for (int i = 0; i < output.length(); i++) {
+                char ch = output.charAt(i);
+                if (ch < 0x20) {
+                    assertTrue("literal C0 control U+" + Integer.toHexString(unit),
+                        ch == '\t' || ch == '\n' || ch == '\r');
+                }
+                assertFalse("literal C1 control from U+" + Integer.toHexString(unit),
+                    ch >= 0x7F && ch <= 0x9F);
+                assertNotLineSeparator(unit, ch);
+                if (Character.isHighSurrogate(ch)) {
+                    assertTrue("lone high surrogate from U+" + Integer.toHexString(unit),
+                        i + 1 < output.length()
+                            && Character.isLowSurrogate(output.charAt(i + 1)));
+                    int codePoint = Character.toCodePoint(ch, output.charAt(i + 1));
+                    assertFalse("noncharacter pair from U+" + Integer.toHexString(unit),
+                        Unicode.isNonCharacter(codePoint));
+                    i++;
+                } else {
+                    assertFalse("lone low surrogate from U+"
+                        + Integer.toHexString(unit), Character.isLowSurrogate(ch));
+                }
+            }
+        }
+    }
+
+    private static void assertNotLineSeparator(int sourceUnit, char ch) {
+        if (ch == Unicode.LINE_SEPARATOR) {
+            fail("literal line separator from U+" + Integer.toHexString(sourceUnit));
+        }
+    }
+
+    /**
+     * Legal Unicode text, including supplementary characters expressed as
+     * surrogate pairs, must survive encoding unchanged rather than being
+     * over-escaped or replaced.
+     */
+    public void testLegalUnicodeTextIsPreserved() {
+        String legal = "abc\u00e9\u4e2d\ud800\udc00"
+            + new String(Character.toChars(0x1F600)) + "\u2029\ufffd";
+        assertEquals(legal, Encode.forXml11(legal));
+        assertEquals(legal, Encode.forXml11Content(legal));
+        assertEquals(legal, Encode.forXml11Attribute(legal));
+        // The first and last characters of the supplementary range are kept.
+        assertEquals(new String(Character.toChars(0x10000)),
+            Encode.forXml11(new String(Character.toChars(0x10000))));
+        assertEquals(new String(Character.toChars(0x10FFFD)),
+            Encode.forXml11(new String(Character.toChars(0x10FFFD))));
+    }
+
+    /**
+     * Restricted controls are emitted as ASCII character references, so the
+     * security-critical encoding survives lossy output charsets. Rejected
+     * input becomes an ASCII space and never produces a replacement question
+     * mark or an unencodable surrogate.
+     */
+    public void testFailClosedOutputIsSerializableToAscii() {
+        String input = "\u0001\u007F\u0085\u2028\u0000\ud800\udbff\udffe\ufffe";
+        String encoded = Encode.forXml11(input);
+        byte[] ascii = encoded.getBytes(StandardCharsets.US_ASCII);
+        assertEquals(encoded, new String(ascii, StandardCharsets.US_ASCII));
+        byte[] latin1 = encoded.getBytes(StandardCharsets.ISO_8859_1);
+        assertEquals(encoded, new String(latin1, StandardCharsets.ISO_8859_1));
+        for (int i = 0; i < encoded.length(); i++) {
+            char ch = encoded.charAt(i);
+            assertTrue("non-ASCII unit U+" + Integer.toHexString(ch),
+                ch < 0x80 || Character.isHighSurrogate(ch)
+                    || Character.isLowSurrogate(ch));
+        }
+    }
+
+    /**
+     * Version and range fail together: an XML 1.1 restricted-character
+     * reference placed in an XML 1.0 document is rejected by the parser
+     * instead of being silently interpreted as different text.
+     */
+    public void testXml11ReferencesAreRejectedInXml10Document() throws Exception {
+        String encoded = Encode.forXml11("x\u0001\u007Fy");
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder silentBuilder = factory.newDocumentBuilder();
+        silentBuilder.setErrorHandler(new DefaultHandler());
+        boolean rejected = false;
+        try {
+            silentBuilder.parse(new InputSource(
+                new StringReader("<?xml version=\"1.0\"?><r>" + encoded + "</r>")));
+        } catch (SAXParseException expected) {
+            rejected = true;
+        }
+        assertTrue("XML 1.0 parser must reject XML 1.1 control references",
+            rejected);
+        // The same payload is well-formed and round-trips in an XML 1.1 doc.
+        Element root = silentBuilder.parse(new InputSource(
+            new StringReader("<?xml version=\"1.1\"?><r>" + encoded + "</r>")))
+            .getDocumentElement();
+        assertEquals("x\u0001\u007Fy", root.getTextContent());
+    }
+
+    /**
+     * Streaming must apply the same version/range decision as the String
+     * facade, including when a surrogate pair or a control/surrogate boundary
+     * is split across writes and across the writer's internal buffering.
+     */
+    public void testXML11StreamingMatchesWholeStringAcrossSplits()
+            throws IOException {
+        String[] probes = {
+            "\ud800\udc00", "\udbff\udffe", "\ud800", "\udc00",
+            "a\u0001\ud800\udc00b", "\ud800\u007f\udc00", "\udc00\ud800\udc00",
+            "\u0000\udbff\udfff", "\u2028\u0085\ud800\udc00",
+            repeat('a', 1024) + "\ud800\udc00\u0001",
+        };
+        for (String input : probes) {
+            String expected = Encode.forXml11(input);
+            for (int split = 0; split <= input.length(); split++) {
+                StringWriter output = new StringWriter();
+                EncodedWriter writer = new EncodedWriter(output, Encoders.XML_11);
+                writer.write(input, 0, split);
+                writer.write(input, split, input.length() - split);
+                writer.close();
+                assertEquals("split " + split + " of " + input.length(),
+                    expected, output.toString());
+            }
+        }
+    }
+
+    /**
+     * A high surrogate held pending at an explicit flush cannot be emitted as
+     * a lone surrogate. It stays pending until its low surrogate arrives, and
+     * is replaced with a space if the stream ends without one.
+     */
+    public void testPendingSurrogateFlushIsFailClosed() throws IOException {
+        StringWriter output = new StringWriter();
+        EncodedWriter writer = new EncodedWriter(output, Encoders.XML_11);
+        writer.write("a\ud800");
+        writer.flush();
+        assertEquals("pending high surrogate stays hidden", "a",
+            output.toString());
+        writer.write("\udc00b");
+        writer.close();
+        assertEquals("a\ud800\udc00b", output.toString());
+
+        output = new StringWriter();
+        writer = new EncodedWriter(output, Encoders.XML_11);
+        writer.write("c\ud800");
+        writer.flush();
+        writer.close();
+        assertEquals("unpaired high surrogate is replaced", "c ",
+            output.toString());
+    }
+
+    private static String repeat(char ch, int count) {
+        char[] chars = new char[count];
+        java.util.Arrays.fill(chars, ch);
+        return new String(chars);
     }
 }
